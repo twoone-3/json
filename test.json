@@ -1,8 +1,5 @@
 {
   "namespace": "crafting",
-  //---------------------------------------------------------------------------
-  // Common
-  //---------------------------------------------------------------------------
   "inventory_x_gamepad_helper@common.gamepad_helper_x": {
     "bindings": [
       {
@@ -10,7 +7,7 @@
         "binding_name_override": "#visible",
         "binding_condition": "always"
       }
-    ]jjjjj
+    ]
   },
   "inventory_y_gamepad_helper@common.gamepad_helper_y": {
     "bindings": [
@@ -174,9 +171,6 @@
       }
     ]
   },
-  //---------------------------------------------------------------------------
-  // Creative Grid Items
-  //---------------------------------------------------------------------------
   "inventory_container_slot_button@common.container_slot_button_prototype": {
     "$button_take_half_place_one|default": "button.container_take_half_place_one",
     "$button_auto_place|default": "button.container_auto_place",
@@ -319,9 +313,6 @@
     "$button_take_half_place_one": "button.crafting_output_secondary",
     "$button_auto_place": "button.crafting_output_tertiary"
   },
-  //---------------------------------------------------------------------------
-  // Creative Tabs
-  //---------------------------------------------------------------------------
   "tab_image": {
     "type": "image",
     "layer": 2,
@@ -403,13 +394,10 @@
       }
     ]
   },
-  //---------------------------------------------------------------------------
-  // Tab Navigation
-  //---------------------------------------------------------------------------
   "top_tab@common_tabs.tab_top": {
     "$toggle_focus_enabled": false,
     "$toggle_name": "navigation_tab",
-    "$toggle_group_default_selected": "$construction_index", //Construction tab
+    "$toggle_group_default_selected": "$construction_index",
     "$tab_content": "crafting.empty_tab_panel"
   },
   "search_tab@crafting.top_tab": {
@@ -821,9 +809,6 @@
       }
     ]
   },
-  //---------------------------------------------------------------------------
-  // Player and armor
-  //---------------------------------------------------------------------------
   "armor_overlay": {
     "type": "image",
     "layer": 2,
@@ -1070,9 +1055,6 @@
       }
     ]
   },
-  //---------------------------------------------------------------------------
-  // Crafting panels, 2x2 and 3x3
-  //---------------------------------------------------------------------------
   "crafting_label": {
     "type": "label",
     "anchor_from": "top_left",
@@ -1363,7 +1345,7 @@
         }
       },
       {
-        "inventory_label@inventory_label": { //? refactor this out
+        "inventory_label@inventory_label": {
           "offset": [
             -21,
             72
@@ -1522,12 +1504,6 @@
       }
     ]
   },
-  //---------------------------------------------------------------------------
-  // Base Panels
-  //---------------------------------------------------------------------------
-  // Top half of ui, elements specific to survival inventory
-  // - player with armor on left
-  // - small crafting panel (2x2) on right
   "survival_panel_top_half": {
     "type": "panel",
     "size": [
@@ -1545,8 +1521,6 @@
       }
     ]
   },
-  // Top half of ui, elements specific to crafting screen
-  // - large crafting panel 3x3 on top half
   "crafting_panel_top_half": {
     "type": "panel",
     "size": [
@@ -1566,9 +1540,6 @@
       }
     ]
   },
-  //---------------------------------------------------------------------------
-  // Screens, survival inventory and crafting
-  //---------------------------------------------------------------------------
   "recipe_container_cell_images": {
     "type": "image",
     "$cell_images_binding_condition|default": "visible",
@@ -1979,8 +1950,6 @@
     "$hover_text_binding_name": "#recipe_hover_text",
     "size": "$scrolling_grid_item_size"
   },
-  //----------------------------------
-  //----------------------------------
   "scroll_grid_panel@crafting.crafting_root_panel": {
     "type": "input_panel",
     "size": [
@@ -2051,9 +2020,6 @@
     "$scrolling_content": "crafting.scroll_grid_panel",
     "$collection_name": "recipe_book"
   },
-  //------------------------
-  // Other parts
-  //------------------------
   "creative_label": {
     "type": "label",
     "size": [
@@ -2117,9 +2083,6 @@
       }
     ]
   },
-  //---------------------------
-  // Toolbar Controls
-  //---------------------------
   "toolbar_background": {
     "type": "image",
     "texture": "textures/ui/toolbar_background"
@@ -2213,9 +2176,6 @@
       }
     ]
   },
-  //---------------------------
-  // Layout Panels
-  //---------------------------
   "player_inventory@common.root_panel": {
     "layer": 4,
     "controls": [
@@ -2642,8 +2602,6 @@
       }
     ]
   },
-  //---------------------------
-  //---------------------------
   "inventory_screen_base@common.inventory_screen_common": {
     "button_mappings": [
       {
@@ -2946,9 +2904,6 @@
         }
       },
       {
-/* s
-*/
-        
        "selected_item_details_factory@common.selected_item_details_factory": {}
       }
     ]

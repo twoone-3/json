@@ -1,4 +1,4 @@
-﻿// Jsob.h version 1.3.3 made by twoone3
+﻿// Json.h made by twoone3
 // Github: https://github.com/twoone-3/Json
 #pragma once
 #include <iostream>
@@ -8,67 +8,131 @@
 
 namespace Json {
 using std::move;
+using std::string;
 
 //JSON类型枚举
-enum class Type {
-	Null,
-	Bool,
-	Integer,
-	Double,
-	String,
-	Array,
-	Object
+enum ValueType : char {
+	null_value,
+	bool_value,
+	int_value,
+	int64_value,
+	double_value,
+	string_value,
+	array_value,
+	object_value
 };
-//字符串类型
-using String = std::string;
-//数组类型
-using Array = std::map<size_t, class Value>;
+//数组索引
+using ArrayIndex = unsigned long long;
+//索引类型
+//当str_为0时，num_为数组索引
+//当str_不为0时，str_为对象的键，num_为字符串的长度
+class Index {
+public:
+	char* str_ = 0;
+	size_t num_ = 0;
+
+	Index() {}
+	Index(const ArrayIndex n) :num_(n) {}
+	Index(const char* str) {
+		num_ = strlen(str);
+		str_ = (char*)malloc(num_ + 1);
+		memcpy(str_, str, num_ + 1);
+	}
+	Index(const string& str) {
+		num_ = str.length();
+		str_ = (char*)malloc(num_ + 1);
+		memcpy(str_, str.c_str(), num_ + 1);
+	}
+	Index(const Index& other) {
+		num_ = other.num_;
+		if (other.str_) {
+			str_ = (char*)malloc(num_ + 1);
+			memcpy(str_, other.str_, num_ + 1);
+		}
+	}
+	Index(Index&& other) {
+		str_ = other.str_;
+		num_ = other.num_;
+		other.str_ = nullptr;
+	}
+	~Index() {
+		if (str_)free(str_);
+	}
+
+	Index& operator=(const Index& other) {
+		return operator=(Index(other));
+	}
+	Index& operator=(Index&& other) {
+		std::swap(num_, other.num_);
+		std::swap(str_, other.str_);
+	}
+	bool operator<(const Index& other)const {
+		if (!str_)
+			return num_ < other.num_;
+		;
+		int comp = memcmp(str_, other.str_, std::min(num_, other.num_));
+		if (comp < 0)
+			return true;
+		if (comp > 0)
+			return false;
+		return (num_ < other.num_);
+	}
+	bool operator==(const Index& other)const {
+		if (!str_)
+			return num_ == other.num_;
+		if (num_ != other.num_)
+			return false;
+		int comp = memcmp(str_, other.str_, num_);
+		return comp == 0;
+	}
+};
+
 //对象类型
-using Object = std::map<String, class Value>;
-//数据联合
-union Data {
-	bool b;
-	long long l;
-	double d;
-	String* s;
-	Array* a;
-	Object* o;
-};
+using Object = std::map<Index, class Value>;
+//空迭代器
+static Object::iterator null_iterator;
+//空迭代器
+static Object::const_iterator null_const_iterator;
 
 //JSON数据类型
 class Value {
 public:
-	Value() : type_(Type::Null) {}
-	Value(const bool b) : type_(Type::Bool) { data_.b = b; }
-	Value(const int i) : type_(Type::Integer) { data_.l = i; }
-	Value(const long long l) : type_(Type::Integer) { data_.l = l; }
-	Value(const double d) : type_(Type::Double) { data_.d = d; }
-	Value(const char* s) : type_(Type::String) { data_.s = new String(s); }
-	Value(const String& s) : type_(Type::String) { data_.s = new String(s); }
-	Value(const Array& a) : type_(Type::Array) { data_.a = new Array(a); }
-	Value(const Object& o) : type_(Type::Object) { data_.o = new Object(o); }
+	Value() : type_(null_value) {}
+	Value(const bool b) : type_(bool_value) { data_.b = b; }
+	Value(const int i) : type_(int_value) { data_.i = i; }
+	Value(const long long l) : type_(int64_value) { data_.l = l; }
+	Value(const double d) : type_(double_value) { data_.d = d; }
+	Value(const char* s) : type_(string_value) { data_.s = new string(s); }
+	Value(const string& s) : type_(string_value) { data_.s = new string(s); }
 
+	Value(const ValueType type) :type_(type) {
+		switch (type) {
+		case string_value:data_.s = new string; break;
+		case array_value:
+		case object_value:data_.o = new Object; break;
+		}
+	};
 	Value(const Value& other) {
 		switch (other.type_) {
-		case Type::Null:break;
-		case Type::Bool:data_.b = other.data_.b; break;
-		case Type::Integer:data_.l = other.data_.l; break;
-		case Type::Double:data_.d = other.data_.d; break;
-		case Type::String:
-			data_.s = new String(*other.data_.s);
+		case null_value:break;
+		case bool_value:data_.b = other.data_.b; break;
+		case int_value:data_.i = other.data_.i; break;
+		case int64_value:data_.l = other.data_.l; break;
+		case double_value:data_.d = other.data_.d; break;
+		case string_value:
+			data_.s = new string(*other.data_.s);
 			break;
-		case Type::Array:
-			data_.a = new Array(*other.data_.a);
-			break;
-		case Type::Object:
+		case array_value:
+		case object_value:
 			data_.o = new Object(*other.data_.o);
 			break;
 		}
 		type_ = other.type_;
 	};
 	Value(Value&& other) {
-		std::swap(data_, other.data_);
-		std::swap(type_, other.type_);
+		data_ = other.data_;
+		type_ = other.type_;
+		other.type_ = null_value;
 	};
 
 	~Value() { clear(); }
@@ -87,13 +151,14 @@ public:
 		if (type_ != other.type_)
 			return false;
 		switch (other.type_) {
-		case Type::Null:break;
-		case Type::Bool:return data_.b == other.data_.b;
-		case Type::Integer:return data_.l == other.data_.l;
-		case Type::Double:return data_.d == other.data_.d;
-		case Type::String:return *data_.s == *other.data_.s;
-		case Type::Array:return *data_.a == *other.data_.a;
-		case Type::Object:return *data_.o == *other.data_.o;
+		case null_value:break;
+		case bool_value:return data_.b == other.data_.b;
+		case int_value:return data_.i == other.data_.i;
+		case int64_value:return data_.l == other.data_.l;
+		case double_value:return data_.d == other.data_.d;
+		case string_value:return *data_.s == *other.data_.s;
+		case array_value:
+		case object_value:return *data_.o == *other.data_.o;
 		}
 		return true;
 	}
@@ -102,173 +167,205 @@ public:
 	}
 
 	//取键对应值
-	Value& operator[](const String& i) {
-		setObject();
-		return data_.o->operator[](i);
+	Value& operator[](const Index& index) {
+		if (index.str_)
+			setObject();
+		else
+			setArray();
+		return data_.o->operator[](index);
 	}
-	Value& get(const String& i) {
-		return operator[](i);
-	}
-	//取索引对应值
-	Value& operator[](const size_t i) {
-		setArray();
-		return data_.a->operator[](i);
-	}
-	Value& get(const size_t i) {
-		return operator[](i);
+	//插入一个值
+	void insert(const Index& index, Value&& value) {
+		if (index.str_)
+			setObject();
+		else
+			setArray();
+		data_.o->insert_or_assign(index, value);
 	}
 
+	//强转类型无检查!
 	//*(T*)this
 	template<typename T>
 	T& as() { return *(T*)this; }
 
 	bool& asBool() { return data_.b; }
-	int& asInt() { return *(int*)this; }
-	unsigned& asUInt() { return *(unsigned*)this; }
+	int& asInt() { return data_.i; }
 	long long& asInt64() { return data_.l; }
 	double& asDouble() { return data_.d; }
-	String& asString() { return *data_.s; }
-	Array& asArray() { return *data_.a; }
-	Object& asObject() { return *data_.o; }
+	string& asString() { return *data_.s; }
 
 	const bool& asBool()const { return data_.b; }
-	const int& asInt()const { return *(int*)this; }
-	const unsigned& asUInt()const { return *(unsigned*)this; }
+	const int& asInt()const { return data_.i; }
 	const long long& asInt64()const { return data_.l; }
 	const double& asDouble()const { return data_.d; }
-	const String& asString()const { return *data_.s; }
-	const Array& asArray()const { return *data_.a; }
-	const Object& asObject()const { return *data_.o; }
+	const string& asString()const { return *data_.s; }
 
-	bool isNull()const { return type_ == Type::Null; }
-	bool isBool()const { return type_ == Type::Bool; }
-	bool isInteger()const { return type_ == Type::Integer; }
-	bool isDouble()const { return type_ == Type::Double; }
-	bool isNumber()const { return type_ == Type::Integer || type_ == Type::Double; }
-	bool isString()const { return type_ == Type::String; }
-	bool isArray()const { return type_ == Type::Array; }
-	bool isObject()const { return type_ == Type::Object; }
+	bool isNull()const { return type_ == null_value; }
+	bool isBool()const { return type_ == bool_value; }
+	bool isInt()const { return type_ == int_value; }
+	bool isInt64()const { return type_ == int64_value; }
+	bool isDouble()const { return type_ == double_value; }
+	bool isNumber()const { return type_ == int_value || type_ == int64_value || type_ == double_value; }
+	bool isString()const { return type_ == string_value; }
+	bool isArray()const { return type_ == array_value; }
+	bool isObject()const { return type_ == object_value; }
 
 	//新建一个字符串
 	void setString() {
-		if (type_ != Type::String) {
+		if (type_ != string_value) {
 			clear();
-			data_.s = new String;
-			type_ = Type::String;
-		}
-	}
-	//新建一个对象
-	void setArray() {
-		if (type_ != Type::Array) {
-			clear();
-			data_.a = new Array;
-			type_ = Type::Array;
+			data_.s = new string;
+			type_ = string_value;
 		}
 	}
 	//新建一个数组
-	void setObject() {
-		if (type_ != Type::Object) {
+	void setArray() {
+		if (type_ != array_value) {
 			clear();
 			data_.o = new Object;
-			type_ = Type::Object;
+			type_ = array_value;
+		}
+	}
+	//新建一个对象
+	void setObject() {
+		if (type_ != object_value) {
+			clear();
+			data_.o = new Object;
+			type_ = object_value;
 		}
 	}
 
 	//获取类型
-	Type type()const { return type_; }
+	ValueType type()const { return type_; }
 
-	//移除数组的指定成员
-	bool remove(size_t i) {
-		if (type_ != Type::Array)
-			return false;
-		size_t size = data_.a->size();
-		if (i >= size)
-			return false;
-		for (; i < size - 1; ++i) {
-			std::swap((*data_.a)[i], (*data_.a)[i + 1]);
-		}
-		data_.a->erase(size - 1);
-		return true;
+	//交换内容
+	void swap(Value& other) {
+		std::swap(data_, other.data_);
+		std::swap(type_, other.type_);
 	}
+
 	//移除对象的指定成员
-	bool remove(const String& i) {
-		if (type_ != Type::Object)
-			return false;
-		return data_.o->erase(i);
+	bool remove(const Index& index) {
+		if (isObject() && index.str_) {
+			return data_.o->erase(index);
+		}
+		else if (isArray() && !index.str_) {
+			size_t size = data_.o->size();
+			if (index.num_ < size) {
+				for (ArrayIndex i = index.num_; i < size - 1; ++i) {
+					(*data_.o)[i].swap((*data_.o)[i + 1]);
+				}
+				return data_.o->erase(size - 1);
+			}
+		}
+		return false;
 	}
+
 	//向数组追加元素
 	void append(const Value& j) {
 		append(Value(j));
 	}
+	//向数组追加元素
 	void append(Value&& j) {
 		setArray();
-		data_.a->emplace(data_.a->size(), j);
+		data_.o->emplace(data_.o->size(), j);
 	}
+
 	//获取大小
 	size_t size()const {
 		switch (type_) {
-		case Type::Null:break;
-		case Type::Bool:break;
-		case Type::Integer:break;
-		case Type::Double:break;
-		case Type::String:break;
-		case Type::Array:return data_.a->size();
-		case Type::Object:return data_.o->size();
+		case null_value:return 0;
+		case string_value:return data_.s->size();
+		case array_value:
+		case object_value:return data_.o->size();
 		}
-		return 0;
+		return 1;
 	}
+
 	//是否为空
 	bool empty()const {
 		switch (type_) {
-		case Type::Null:return true;
-		case Type::Bool:break;
-		case Type::Integer:break;
-		case Type::Double:break;
-		case Type::String:break;
-		case Type::Array:return data_.a->empty();
-		case Type::Object:return data_.o->empty();
+		case null_value:return true;
+		case string_value:return data_.s->empty();
+		case array_value:
+		case object_value:return data_.o->empty();
 		}
 		return false;
 	}
+
 	//是否拥有某个键
-	bool has(const String& key)const {
-		if (type_ != Type::Object)
+	bool has(const string& key)const {
+		if (type_ != object_value)
 			return false;
 		return data_.o->find(key) != data_.o->end();
 	}
+
 	//清除内容
 	void clear() {
 		switch (type_) {
-		case Type::Null:break;
-		case Type::Bool:break;
-		case Type::Integer:break;
-		case Type::Double:break;
-		case Type::String:delete data_.s; break;
-		case Type::Array:delete data_.a; break;
-		case Type::Object:delete data_.o; break;
+		case string_value:delete data_.s; break;
+		case array_value:
+		case object_value:delete data_.o; break;
 		}
-		type_ = Type::Null;
-		data_.s = 0;
+		type_ = null_value;
+	}
+
+	//返回开始的迭代器
+	Object::iterator begin() {
+		if (isArray() || isObject())
+			return data_.o->begin();
+		else
+			return null_iterator;
+	}
+	//返回开始的迭代器
+	Object::const_iterator begin()const {
+		if (isArray() || isObject())
+			return data_.o->begin();
+		else
+			return null_const_iterator;
+	}
+
+	//返回结束的迭代器
+	Object::iterator end() {
+		if (isArray() || isObject())
+			return data_.o->end();
+		else
+			return null_iterator;
+	}
+	//返回结束的迭代器
+	Object::const_iterator end()const {
+		if (isArray() || isObject())
+			return data_.o->end();
+		else
+			return null_const_iterator;
 	}
 
 	//转换成紧凑的字符串
-	String toString()const;
+	string toString()const;
+
 	//转换成格式化的字符串
-	String toStyledString()const;
+	string toStyledString()const;
 
 private:
-	Data data_;
-	Type type_;
+	union Data {
+		bool b;
+		int i;
+		long long l;
+		double d;
+		string* s;
+		Object* o;
+	} data_;
+	ValueType type_ = null_value;
 };
 //用于解析JSON
 class Reader {
 	const char* ptr_;
 	unsigned line_;
-	String err_;
+	string err_;
 public:
 	Reader(const char* s) :ptr_(s), line_(1) {}
 
-	String& getErrorString() { return err_; }
+	string& getErrorString() { return err_; }
 	const char& readChar() { return *ptr_; }
 	const char& readNextCharFront() { return *++ptr_; }
 	const char& readNextCharBack() { return *ptr_++; }
@@ -315,23 +412,23 @@ public:
 	bool readNumber(Value& value) {
 		char* end;
 		double num = strtod(ptr_, &end);
-		bool is_double = false;
+		bool isdouble = false;
 		for (const char* tmp = ptr_; tmp != end; tmp++) {
 			switch (*tmp) {
 			case'.':
 			case'e':
 			case'E':
-				is_double = true;
+				isdouble = true;
 			}
 		}
-		if (is_double)
+		if (isdouble)
 			value = num;
 		else
-			value = (long long)num;
+			value = (int)num;
 		ptr_ = end;
 		return true;
 	}
-	bool readString(String& s) {
+	bool readstring(string& s) {
 		nextChar();
 		char ch;
 		while (true) {
@@ -392,9 +489,9 @@ public:
 		}
 		return true;
 	}
-	bool readString(Value& value) {
+	bool readstring(Value& value) {
 		value.setString();
-		return readString(value.asString());
+		return readstring(value.asString());
 	}
 	bool readArray(Value& value) {
 		nextChar();
@@ -405,7 +502,7 @@ public:
 			return true;
 		}
 		while (true) {
-			JSON_CHECK(readValue(value.asArray()[value.asArray().size()]));
+			JSON_CHECK(readValue(value[value.size()]));
 			JSON_CHECK(skipBlank());
 			if (readChar() == ',') {
 				nextChar();
@@ -435,15 +532,15 @@ public:
 				addError("Miss '\"'");
 				return false;
 			}
-			String key;
-			JSON_CHECK(readString(key));
+			string key;
+			JSON_CHECK(readstring(key));
 			JSON_CHECK(skipBlank());
 			if (readChar() != ':') {
 				addError("Miss ':'");
 				return false;
 			}
 			nextChar();
-			JSON_CHECK(readValue(value.asObject()[key]));
+			JSON_CHECK(readValue(value[key]));
 			JSON_CHECK(skipBlank());
 			if (readChar() == ',')
 				nextChar();
@@ -468,7 +565,7 @@ public:
 		case 'f':return readFalse(value);
 		case '[':return readArray(value);
 		case '{':return readObject(value);
-		case '"':return readString(value);
+		case '"':return readstring(value);
 		default:return readNumber(value);
 		}
 		return true;
@@ -502,7 +599,6 @@ public:
 						if (readChar() == '\n')
 							nextLine();
 						nextChar();
-
 					}
 					nextChar();
 				}
@@ -537,7 +633,7 @@ public:
 		}
 		return true;
 	}
-	static void encode_utf8(unsigned& u, String& s) {
+	static void encode_utf8(unsigned& u, string& s) {
 		if (u <= 0x7F)
 			s += (u & 0xFF);
 		else if (u <= 0x7FF) {
@@ -559,10 +655,10 @@ public:
 };
 //用于生成JSON字符串
 class Writer {
-	String out_;
+	string out_;
 	size_t indent_ = 0;
 public:
-	String& getString() { return out_; }
+	string& getString() { return out_; }
 	void writeNull() {
 		out_.append("null", 4);
 	}
@@ -572,13 +668,16 @@ public:
 		else
 			out_.append("false", 5);
 	}
-	void writeInteger(const long long value) {
+	void writeInt(const int value) {
+		out_.append(std::to_string(value));
+	}
+	void writeInt64(const long long value) {
 		out_.append(std::to_string(value));
 	}
 	void writeDouble(const double value) {
 		char buf[16];
 		snprintf(buf, 15, "%lf", value);
-		String s = buf;
+		string s = buf;
 		while (s.back() == '0') {
 			if (*(&s.back() - 1) != '.')
 				s.pop_back();
@@ -586,12 +685,12 @@ public:
 		}
 		out_.append(s);
 	}
-	void writeString(const String& value) {
+	void writestring(const string& value) {
 		out_.push_back('"');
 		out_.append(value);
 		out_.push_back('"');
 	}
-	void writeArray(const Array& value) {
+	void writeArray(const Value& value) {
 		out_.push_back('[');
 		if (!value.empty()) {
 			for (auto& i : value) {
@@ -602,12 +701,12 @@ public:
 		}
 		out_.push_back(']');
 	}
-	void writeObject(const Object& value) {
+	void writeObject(const Value& value) {
 		out_.push_back('{');
 		if (!value.empty()) {
 			for (auto& i : value) {
 				out_.push_back('"');
-				out_.append(i.first);
+				out_.append(i.first.str_, i.first.num_);
 				out_.push_back('"');
 				out_.push_back(':');
 				writeValue(i.second);
@@ -619,13 +718,14 @@ public:
 	}
 	void writeValue(const Value& value) {
 		switch (value.type()) {
-		case Type::Null:writeNull(); break;
-		case Type::Bool:writeBool(value.asBool()); break;
-		case Type::Integer: writeInteger(value.asInt64()); break;
-		case Type::Double:writeDouble(value.asDouble()); break;
-		case Type::String:writeString(value.asString()); break;
-		case Type::Array:writeArray(value.asArray()); break;
-		case Type::Object:writeObject(value.asObject()); break;
+		case null_value:writeNull(); break;
+		case bool_value:writeBool(value.asBool()); break;
+		case int_value: writeInt(value.asInt()); break;
+		case int64_value: writeInt64(value.asInt64()); break;
+		case double_value:writeDouble(value.asDouble()); break;
+		case string_value:writestring(value.asString()); break;
+		case array_value:writeArray(value); break;
+		case object_value:writeObject(value); break;
 		}
 	}
 	void writeIndent() {
@@ -635,7 +735,7 @@ public:
 	void writeNewline() {
 		out_.push_back('\n');
 	}
-	void writeStyledArray(const Array& value) {
+	void writeStyledArray(const Value& value) {
 		out_.push_back('[');
 		if (!value.empty()) {
 			writeNewline();
@@ -654,7 +754,7 @@ public:
 		}
 		out_.push_back(']');
 	}
-	void writeStyledObject(const Object& value) {
+	void writeStyledObject(const Value& value) {
 		out_.push_back('{');
 		if (!value.empty()) {
 			writeNewline();
@@ -662,7 +762,7 @@ public:
 			for (auto& i : value) {
 				writeIndent();
 				out_.push_back('"');
-				out_.append(i.first);
+				out_.append(i.first.str_, i.first.num_);
 				out_.push_back('"');
 				out_.push_back(':');
 				out_.push_back(' ');
@@ -680,13 +780,14 @@ public:
 	}
 	void writeStyledValue(const Value& value) {
 		switch (value.type()) {
-		case Type::Null:writeNull(); break;
-		case Type::Bool:writeBool(value.asBool()); break;
-		case Type::Integer: writeInteger(value.asInt64()); break;
-		case Type::Double:writeDouble(value.asDouble()); break;
-		case Type::String:writeString(value.asString()); break;
-		case Type::Array:writeStyledArray(value.asArray()); break;
-		case Type::Object:writeStyledObject(value.asObject()); break;
+		case null_value:writeNull(); break;
+		case bool_value:writeBool(value.asBool()); break;
+		case int_value: writeInt(value.asInt()); break;
+		case int64_value: writeInt64(value.asInt64()); break;
+		case double_value:writeDouble(value.asDouble()); break;
+		case string_value:writestring(value.asString()); break;
+		case array_value:writeStyledArray(value); break;
+		case object_value:writeStyledObject(value); break;
 		}
 	}
 };
@@ -699,17 +800,17 @@ Value toJson(const char* str) {
 		std::cerr << r.getErrorString() << std::endl;
 	return move(v);
 }
-Value toJson(const String& str) {
+Value toJson(const string& str) {
 	return toJson(str.c_str());
 }
 //封装函数-将JSON转字符串
-String Value::toString()const {
+string Value::toString()const {
 	Writer w;
 	w.writeValue(*this);
 	return w.getString();
 }
 //封装函数-将JSON转格式化字符串
-String Value::toStyledString()const {
+string Value::toStyledString()const {
 	Writer w;
 	w.writeStyledValue(*this);
 	return w.getString();
