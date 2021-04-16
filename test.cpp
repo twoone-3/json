@@ -41,13 +41,8 @@ int main() {
 )";
 #endif
 	auto start = chrono::steady_clock::now();//
-	Value v = toJson(str);
-	for (size_t i = 0; i < 50; i++) {
-		thread([&] {
-			v.append(toJson(str));
-			//cout << v << endl;
-			}).detach();
-	}
+	Value&& v = toJson(str);
+	v.insert("АЁет", 0);
 	fout << v << endl;
 
 	chrono::duration<double> durString = chrono::steady_clock::now() - start;

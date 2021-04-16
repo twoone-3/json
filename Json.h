@@ -25,65 +25,61 @@ enum ValueType : char {
 using ArrayIndex = unsigned long long;
 //索引类型
 //当str_为0时，num_为数组索引
-//当str_不为0时，str_为对象的键，num_为字符串的长度
+//当str_不为0时，str_为对象的键
 class Index {
+	ArrayIndex num_ = 0;
+	string* str_ = nullptr;
 public:
-	char* str_ = 0;
-	size_t num_ = 0;
-
 	Index() {}
-	Index(const ArrayIndex n) :num_(n) {}
+	Index(int num) :num_(num) {}
+	Index(ArrayIndex num) :num_(num) {}
 	Index(const char* str) {
-		num_ = strlen(str);
-		str_ = (char*)malloc(num_ + 1);
-		memcpy(str_, str, num_ + 1);
+		str_ = new string(str);
 	}
 	Index(const string& str) {
-		num_ = str.length();
-		str_ = (char*)malloc(num_ + 1);
-		memcpy(str_, str.c_str(), num_ + 1);
+		str_ = new string(str);
 	}
 	Index(const Index& other) {
-		num_ = other.num_;
 		if (other.str_) {
-			str_ = (char*)malloc(num_ + 1);
-			memcpy(str_, other.str_, num_ + 1);
+			str_ = new string(*other.str_);
+		}
+		else {
+			num_ = other.num_;
 		}
 	}
 	Index(Index&& other) {
-		str_ = other.str_;
 		num_ = other.num_;
+		str_ = other.str_;
 		other.str_ = nullptr;
 	}
 	~Index() {
-		if (str_)free(str_);
+		if (str_)
+			delete str_;
 	}
 
+	bool isString()const { return str_; }
+	string& asString()const {
+		return *str_;
+	}
+	ArrayIndex asArrayIndex()const { return num_; }
 	Index& operator=(const Index& other) {
 		return operator=(Index(other));
 	}
 	Index& operator=(Index&& other) {
-		std::swap(num_, other.num_);
 		std::swap(str_, other.str_);
+		std::swap(num_, other.num_);
 	}
 	bool operator<(const Index& other)const {
-		if (!str_)
+		if (str_)
+			return *str_ < *other.str_;
+		else
 			return num_ < other.num_;
-		;
-		int comp = memcmp(str_, other.str_, std::min(num_, other.num_));
-		if (comp < 0)
-			return true;
-		if (comp > 0)
-			return false;
-		return (num_ < other.num_);
 	}
 	bool operator==(const Index& other)const {
-		if (!str_)
+		if (str_)
+			return *str_ == *other.str_;
+		else
 			return num_ == other.num_;
-		if (num_ != other.num_)
-			return false;
-		int comp = memcmp(str_, other.str_, num_);
-		return comp == 0;
 	}
 };
 
@@ -97,7 +93,7 @@ static Object::const_iterator null_const_iterator;
 //JSON数据类型
 class Value {
 public:
-	Value() : type_(null_value) {}
+	Value() {}
 	Value(const bool b) : type_(bool_value) { data_.b = b; }
 	Value(const int i) : type_(int_value) { data_.i = i; }
 	Value(const long long l) : type_(int64_value) { data_.l = l; }
@@ -168,7 +164,7 @@ public:
 
 	//取键对应值
 	Value& operator[](const Index& index) {
-		if (index.str_)
+		if (index.isString())
 			setObject();
 		else
 			setArray();
@@ -176,7 +172,7 @@ public:
 	}
 	//插入一个值
 	void insert(const Index& index, Value&& value) {
-		if (index.str_)
+		if (index.isString())
 			setObject();
 		else
 			setArray();
@@ -246,13 +242,13 @@ public:
 
 	//移除对象的指定成员
 	bool remove(const Index& index) {
-		if (isObject() && index.str_) {
+		if (isObject() && index.isString()) {
 			return data_.o->erase(index);
 		}
-		else if (isArray() && !index.str_) {
+		else if (isArray() && !index.isString()) {
 			size_t size = data_.o->size();
-			if (index.num_ < size) {
-				for (ArrayIndex i = index.num_; i < size - 1; ++i) {
+			if (index.asArrayIndex() < size) {
+				for (ArrayIndex i = index.asArrayIndex(); i < size - 1; ++i) {
 					(*data_.o)[i].swap((*data_.o)[i + 1]);
 				}
 				return data_.o->erase(size - 1);
@@ -295,7 +291,7 @@ public:
 
 	//是否拥有某个键
 	bool has(const string& key)const {
-		if (type_ != object_value)
+		if (!isObject())
 			return false;
 		return data_.o->find(key) != data_.o->end();
 	}
@@ -341,7 +337,7 @@ public:
 	}
 
 	//转换成紧凑的字符串
-	string toString()const;
+	string toFastString()const;
 
 	//转换成格式化的字符串
 	string toStyledString()const;
@@ -353,28 +349,46 @@ private:
 		long long l;
 		double d;
 		string* s;
-		Object* o;
+		Object* o = nullptr;
 	} data_;
 	ValueType type_ = null_value;
 };
 //用于解析JSON
 class Reader {
-	const char* ptr_;
-	unsigned line_;
-	string err_;
+	const char* ptr_ = nullptr;
+	unsigned line_ = 1;
+	const char* err_ = nullptr;
 public:
-	Reader(const char* s) :ptr_(s), line_(1) {}
+	Reader(const char* str) :ptr_(str) {}
 
-	string& getErrorString() { return err_; }
+	string getErrorString() {
+		string err;
+		return err.append(err_).append(" in Line ").append(std::to_string(line_));
+	}
+	bool readValue(Value& value) {
+		JSON_CHECK(skipBlank());
+		switch (readChar()) {
+		case '\0':
+			addError("Invalid character");
+			return false;
+		case 'n':return readNull();
+		case 't':return readTrue(value);
+		case 'f':return readFalse(value);
+		case '[':return readArray(value);
+		case '{':return readObject(value);
+		case '"':return readString(value);
+		default:return readNumber(value);
+		}
+		return true;
+	}
+private:
 	const char& readChar() { return *ptr_; }
 	const char& readNextCharFront() { return *++ptr_; }
 	const char& readNextCharBack() { return *ptr_++; }
 	void nextChar() { ++ptr_; }
 	void nextLine() { ++line_; }
-	void addError(const char* s) {
-		err_.append(s);
-		err_.append(" at Line ");
-		err_.append(std::to_string(line_));
+	void addError(const char* str) {
+		err_ = str;
 	}
 
 	bool readNull() {
@@ -383,7 +397,7 @@ public:
 			return true;
 		}
 		else {
-			addError("Miss 'null'");
+			addError("Missing 'null'");
 			return false;
 		}
 	}
@@ -394,7 +408,7 @@ public:
 			return true;
 		}
 		else {
-			addError("Miss 'true'");
+			addError("Missing 'true'");
 			return false;
 		}
 	}
@@ -405,7 +419,7 @@ public:
 			return true;
 		}
 		else {
-			addError("Miss 'false'");
+			addError("Missing 'false'");
 			return false;
 		}
 	}
@@ -413,7 +427,7 @@ public:
 		char* end;
 		double num = strtod(ptr_, &end);
 		bool isdouble = false;
-		for (const char* tmp = ptr_; tmp != end; tmp++) {
+		for (const char* tmp = ptr_; tmp != end; ++tmp) {
 			switch (*tmp) {
 			case'.':
 			case'e':
@@ -428,27 +442,27 @@ public:
 		ptr_ = end;
 		return true;
 	}
-	bool readstring(string& s) {
+	bool readString(string& s) {
 		nextChar();
 		char ch;
 		while (true) {
 			ch = readNextCharBack();
 			switch (ch) {
 			case'\0':
-				addError("Miss '\"'");
+				addError("Missing '\"'");
 				return false;
 			case '\"':
 				return true;
 			case '\\':
 				switch (readNextCharBack()) {
-				case '\"': s += '\"'; break;
-				case 'n': s += '\n'; break;
-				case 'r': s += '\r'; break;
-				case 't': s += '\t'; break;
-				case 'f': s += '\f'; break;
-				case 'b': s += '\b'; break;
-				case '/': s += '/'; break;
-				case '\\': s += '\\'; break;
+				case '\"': s.push_back('\"'); break;
+				case 'n': s.push_back('\n'); break;
+				case 'r': s.push_back('\r'); break;
+				case 't': s.push_back('\t'); break;
+				case 'f': s.push_back('\f'); break;
+				case 'b': s.push_back('\b'); break;
+				case '/': s.push_back('/'); break;
+				case '\\': s.push_back('\\'); break;
 				case 'u':
 				{
 					unsigned u = 0;
@@ -489,9 +503,9 @@ public:
 		}
 		return true;
 	}
-	bool readstring(Value& value) {
+	bool readString(Value& value) {
 		value.setString();
-		return readstring(value.asString());
+		return readString(value.asString());
 	}
 	bool readArray(Value& value) {
 		nextChar();
@@ -512,7 +526,7 @@ public:
 				break;
 			}
 			else {
-				addError("Miss ',' or ']'");
+				addError("Missing ',' or ']'");
 				return false;
 			}
 		}
@@ -529,14 +543,14 @@ public:
 		while (true) {
 			JSON_CHECK(skipBlank());
 			if (readChar() != '"') {
-				addError("Miss '\"'");
+				addError("Missing '\"'");
 				return false;
 			}
-			string key;
-			JSON_CHECK(readstring(key));
+			Index key = "";
+			JSON_CHECK(readString(key.asString()));
 			JSON_CHECK(skipBlank());
 			if (readChar() != ':') {
-				addError("Miss ':'");
+				addError("Missing ':'");
 				return false;
 			}
 			nextChar();
@@ -549,26 +563,10 @@ public:
 				return true;
 			}
 			else {
-				addError("Miss ',' or '}'");
+				addError("Missing ',' or '}'");
 				return false;
 			}
 		}
-	}
-	bool readValue(Value& value) {
-		JSON_CHECK(skipBlank());
-		switch (readChar()) {
-		case '\0':
-			addError("Invalid character");
-			return false;
-		case 'n':return readNull();
-		case 't':return readTrue(value);
-		case 'f':return readFalse(value);
-		case '[':return readArray(value);
-		case '{':return readObject(value);
-		case '"':return readstring(value);
-		default:return readNumber(value);
-		}
-		return true;
 	}
 
 	bool skipBlank() {
@@ -593,10 +591,10 @@ public:
 					nextChar();
 					while (readChar() != '*' || *(ptr_ + 1) != '/') {
 						if (readChar() == '\0') {
-							addError("Miss '*/'");
+							addError("Missing '*/'");
 							return false;
 						}
-						if (readChar() == '\n')
+						else if (readChar() == '\n')
 							nextLine();
 						nextChar();
 					}
@@ -635,21 +633,21 @@ public:
 	}
 	static void encode_utf8(unsigned& u, string& s) {
 		if (u <= 0x7F)
-			s += (u & 0xFF);
+			s.push_back((u & 0xFF));
 		else if (u <= 0x7FF) {
-			s += (0xC0 | (0xFF & (u >> 6)));
-			s += (0x80 | (0x3F & u));
+			s.push_back((0xC0 | (0xFF & (u >> 6))));
+			s.push_back((0x80 | (0x3F & u)));
 		}
 		else if (u <= 0xFFFF) {
-			s += (0xE0 | (0xFF & (u >> 12)));
-			s += (0x80 | (0x3F & (u >> 6)));
-			s += (0x80 | (0x3F & u));
+			s.push_back((0xE0 | (0xFF & (u >> 12))));
+			s.push_back((0x80 | (0x3F & (u >> 6))));
+			s.push_back((0x80 | (0x3F & u)));
 		}
 		else {
-			s += (0xF0 | (0xFF & (u >> 18)));
-			s += (0x80 | (0x3F & (u >> 12)));
-			s += (0x80 | (0x3F & (u >> 6)));
-			s += (0x80 | (0x3F & u));
+			s.push_back((0xF0 | (0xFF & (u >> 18))));
+			s.push_back((0x80 | (0x3F & (u >> 12))));
+			s.push_back((0x80 | (0x3F & (u >> 6))));
+			s.push_back((0x80 | (0x3F & u)));
 		}
 	}
 };
@@ -659,6 +657,7 @@ class Writer {
 	size_t indent_ = 0;
 public:
 	string& getString() { return out_; }
+	const string& getString()const { return out_; }
 	void writeNull() {
 		out_.append("null", 4);
 	}
@@ -675,9 +674,7 @@ public:
 		out_.append(std::to_string(value));
 	}
 	void writeDouble(const double value) {
-		char buf[16];
-		snprintf(buf, 15, "%lf", value);
-		string s = buf;
+		string s = std::to_string(value);
 		while (s.back() == '0') {
 			if (*(&s.back() - 1) != '.')
 				s.pop_back();
@@ -685,7 +682,7 @@ public:
 		}
 		out_.append(s);
 	}
-	void writestring(const string& value) {
+	void writeString(const string& value) {
 		out_.push_back('"');
 		out_.append(value);
 		out_.push_back('"');
@@ -706,7 +703,7 @@ public:
 		if (!value.empty()) {
 			for (auto& i : value) {
 				out_.push_back('"');
-				out_.append(i.first.str_, i.first.num_);
+				out_.append(i.first.asString());
 				out_.push_back('"');
 				out_.push_back(':');
 				writeValue(i.second);
@@ -723,14 +720,15 @@ public:
 		case int_value: writeInt(value.asInt()); break;
 		case int64_value: writeInt64(value.asInt64()); break;
 		case double_value:writeDouble(value.asDouble()); break;
-		case string_value:writestring(value.asString()); break;
+		case string_value:writeString(value.asString()); break;
 		case array_value:writeArray(value); break;
 		case object_value:writeObject(value); break;
 		}
 	}
 	void writeIndent() {
-		for (size_t i = indent_; i--;)
-			out_.append("    ", 4);
+		size_t i = indent_;
+		while (i--)
+			out_.push_back('\t');
 	}
 	void writeNewline() {
 		out_.push_back('\n');
@@ -762,7 +760,7 @@ public:
 			for (auto& i : value) {
 				writeIndent();
 				out_.push_back('"');
-				out_.append(i.first.str_, i.first.num_);
+				out_.append(i.first.asString());
 				out_.push_back('"');
 				out_.push_back(':');
 				out_.push_back(' ');
@@ -785,7 +783,7 @@ public:
 		case int_value: writeInt(value.asInt()); break;
 		case int64_value: writeInt64(value.asInt64()); break;
 		case double_value:writeDouble(value.asDouble()); break;
-		case string_value:writestring(value.asString()); break;
+		case string_value:writeString(value.asString()); break;
 		case array_value:writeStyledArray(value); break;
 		case object_value:writeStyledObject(value); break;
 		}
@@ -804,7 +802,7 @@ Value toJson(const string& str) {
 	return toJson(str.c_str());
 }
 //封装函数-将JSON转字符串
-string Value::toString()const {
+string Value::toFastString()const {
 	Writer w;
 	w.writeValue(*this);
 	return w.getString();
@@ -820,3 +818,5 @@ std::ostream& operator<<(std::ostream& o, const Value& v) {
 	return o << v.toStyledString();
 }
 } // namespace Json
+
+using Json::toJson;
