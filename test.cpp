@@ -3,18 +3,9 @@
 #include <fstream>
 #include <thread>
 #include <chrono>
-#define file 1
+#define file 0
 using namespace std;
-//#include "json/json.h"
-//static Json::Value toJson(const string& s) {
-//	Json::Value value;
-//	Json::Reader reader;
-//	if (!reader.parse(s.c_str(), s.c_str() + s.length(), value)) {
-//		cerr << reader.getFormattedErrorMessages() << endl;;
-//	}
-//	return std::move(value);
-//}
-#include "Json.h"
+#include "json.h"
 using namespace Json;
 int main() {
 	system("chcp 65001");
@@ -42,9 +33,7 @@ int main() {
 #endif
 	auto start = chrono::steady_clock::now();//
 	Value&& v = toJson(str);
-	v.insert("АЁет", 0);
-	fout << v << endl;
-
+	cout << v["object"].toFastString() << endl;
 	chrono::duration<double> durString = chrono::steady_clock::now() - start;
 	cout << durString.count() << " seconds" << endl;
 #if file
