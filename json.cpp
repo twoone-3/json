@@ -1,4 +1,5 @@
 ﻿#include "json.h"
+#define JSON_CHECK(x) if(!x)return false
 
 namespace Json {
 #pragma region Index
@@ -51,6 +52,7 @@ Index& Index::operator=(const Index& other) {
 Index& Index::operator=(Index&& other) {
 	std::swap(str_, other.str_);
 	std::swap(num_, other.num_);
+	return *this;
 }
 
 bool Index::operator<(const Index& other)const {
@@ -332,15 +334,15 @@ string Value::toStyledString()const {
 }
 #pragma endregion
 #pragma region Reader
-constexpr const char* error_invalid_character = "Invalid character";
-
 Reader::Reader() {}
 
 string Reader::getErrorString() {
 	string err;
 	unsigned line = 1;
-	for (const char* begin = begin_; begin != ptr_; ++begin)
-		++line;
+	for (const char* begin = begin_; begin != ptr_; ++begin) {
+		if (*begin == '\n')
+			++line;
+	}
 	return err.append(err_).append(" in Line ").append(std::to_string(line));
 }
 
@@ -353,10 +355,14 @@ bool Reader::parse(const char* str, Value& value) {
 	begin_ = str;
 	return readValue(value);
 }
-const char& Reader::readChar() { return *ptr_; }
-const char& Reader::readNextCharFront() { return *++ptr_; }
-const char& Reader::readNextCharBack() { return *ptr_++; }
-void Reader::nextChar() { ++ptr_; }
+
+inline const char& Reader::readChar() { return *ptr_; }
+
+inline const char& Reader::readNextCharFront() { return *++ptr_; }
+
+inline const char& Reader::readNextCharBack() { return *ptr_++; }
+
+inline void Reader::nextChar() { ++ptr_; }
 
 bool Reader::readNull() {
 	if (readNextCharFront() == 'u' && readNextCharFront() == 'l' && readNextCharFront() == 'l') {
@@ -367,6 +373,7 @@ bool Reader::readNull() {
 		return err_ = "Missing 'null'", false;
 	}
 }
+
 bool Reader::readTrue(Value& value) {
 	if (readNextCharFront() == 'r' && readNextCharFront() == 'u' && readNextCharFront() == 'e') {
 		nextChar();
@@ -377,6 +384,7 @@ bool Reader::readTrue(Value& value) {
 		return err_ = "Missing 'true'", false;
 	}
 }
+
 bool Reader::readFalse(Value& value) {
 	if (readNextCharFront() == 'a' && readNextCharFront() == 'l' && readNextCharFront() == 's' && readNextCharFront() == 'e') {
 		nextChar();
@@ -387,36 +395,35 @@ bool Reader::readFalse(Value& value) {
 		return err_ = "Missing 'false'", false;
 	}
 }
+
 bool Reader::readNumber(Value& value) {
 	char* end;
 	double num = strtod(ptr_, &end);
 	bool isdouble = false;
 	for (const char* tmp = ptr_; tmp != end; ++tmp) {
-		switch (*tmp) {
-		case'.':
-		case'e':
-		case'E':
+		char c = *tmp;
+		if (c == '.' || c == 'e' || c == 'E') {
 			isdouble = true;
+			break;
 		}
 	}
 	if (isdouble)
 		value = num;
 	else
-		value = (int)num;
+		value = static_cast<long long>(num);
 	ptr_ = end;
 	return true;
 }
+
 bool Reader::readString(string& s) {
 	nextChar();
-	char ch;
 	while (true) {
-		ch = readNextCharBack();
-		switch (ch) {
-		case'\0':
+		char ch = readNextCharBack();
+		if (!ch)
 			return err_ = "Missing '\"'", false;
-		case '\"':
+		if (ch == '"')
 			return true;
-		case '\\':
+		if (ch == '\\')
 			switch (readNextCharBack()) {
 			case '\"': s.push_back('\"'); break;
 			case 'n': s.push_back('\n'); break;
@@ -426,49 +433,25 @@ bool Reader::readString(string& s) {
 			case 'b': s.push_back('\b'); break;
 			case '/': s.push_back('/'); break;
 			case '\\': s.push_back('\\'); break;
-			case 'u':
-			{
-				unsigned u = 0;
-				readHex4(u);
-				if (u >= 0xD800 && u <= 0xDBFF) {
-					if (readNextCharBack() != '\\') {
-						return err_ = error_invalid_character, false;
-						return false;
-					}
-					if (readNextCharBack() != 'u') {
-						return err_ = error_invalid_character, false;
-						return false;
-					}
-					unsigned tmp_u;
-					readHex4(tmp_u);
-					if (tmp_u < 0xDC00 || tmp_u > 0xDFFF) {
-						return err_ = error_invalid_character, false;
-						return false;
-					}
-					u = 0x10000 + (u - 0xD800) * 0x400 + (tmp_u - 0xDC00);
-				}
-				if (u > 0x10FFFF) {
-					return err_ = error_invalid_character, false;
-					return false;
-				}
-				encode_utf8(u, s);
-				break;
-			}
+			case 'u': {
+				unsigned unicode;
+				JSON_CHECK(readUnicode(unicode));
+				encode_utf8(unicode, s);
+			}break;
 			default:
 				return err_ = "Invalid Escape character", false;
 			}
-			break;
-		default:
+		else
 			s.push_back(ch);
-			break;
-		}
 	}
 	return true;
 }
+
 bool Reader::readString(Value& value) {
 	value.setString();
 	return readString(*value.data().s);
 }
+
 bool Reader::readArray(Value& value) {
 	nextChar();
 	JSON_CHECK(skipBlank());
@@ -493,6 +476,7 @@ bool Reader::readArray(Value& value) {
 	}
 	return true;
 }
+
 bool Reader::readObject(Value& value) {
 	nextChar();
 	JSON_CHECK(skipBlank());
@@ -502,11 +486,11 @@ bool Reader::readObject(Value& value) {
 		return true;
 	}
 	while (true) {
+		string key;
 		JSON_CHECK(skipBlank());
 		if (readChar() != '"') {
 			return err_ = "Missing '\"'", false;
 		}
-		string key;
 		JSON_CHECK(readString(key));
 		JSON_CHECK(skipBlank());
 		if (readChar() != ':') {
@@ -526,11 +510,12 @@ bool Reader::readObject(Value& value) {
 		}
 	}
 }
+
 bool Reader::readValue(Value& value) {
 	JSON_CHECK(skipBlank());
 	switch (readChar()) {
 	case '\0':
-		return err_ = error_invalid_character, false;
+		return err_ = "Invalid character", false;
 	case 'n':return readNull();
 	case 't':return readTrue(value);
 	case 'f':return readFalse(value);
@@ -580,10 +565,11 @@ bool Reader::skipBlank() {
 	}
 	return true;
 }
-bool Reader::readHex4(unsigned& u) {
-	u = 0;
+
+bool Reader::readHex4(unsigned& unicode) {
+	unsigned u = 0;
 	char ch = 0;
-	for (int i = 0; i < 4; i++) {
+	for (unsigned i = 0; i < 4; ++i) {
 		u <<= 4;
 		ch = readNextCharBack();
 		if (ch >= '0' && ch <= '9')
@@ -593,10 +579,30 @@ bool Reader::readHex4(unsigned& u) {
 		else if (ch >= 'A' && ch <= 'F')
 			u |= ch - 'A' + 10;
 		else
-			return err_ = error_invalid_character, false;
+			return err_ = "Invalid character", false;
 	}
+	unicode = u;
 	return true;
 }
+
+bool Reader::readUnicode(unsigned& unicode) {
+	unsigned u = 0;
+	readHex4(u);
+	if (u >= 0xD800 && u <= 0xDBFF) {
+		if (readNextCharBack() == '\\' && readNextCharBack() == 'u') {
+			unsigned surrogatePair;
+			if (readHex4(surrogatePair))
+				u = 0x10000 + ((u & 0x3FF) << 10) + (surrogatePair & 0x3FF);
+			else
+				return false;
+		}
+		else
+			return err_ = "expecting another \\u token to begin the second half of a unicode surrogate pair", false;
+	}
+	unicode = u;
+	return true;
+}
+
 void Reader::encode_utf8(unsigned& u, string& s) {
 	if (u <= 0x7F)
 		s.push_back((u & 0xFF));
@@ -619,18 +625,23 @@ void Reader::encode_utf8(unsigned& u, string& s) {
 #pragma endregion
 #pragma region Writer
 const string& Writer::getString()const { return out_; }
+
 void Writer::writeNull() {
 	out_.append("null", 4);
 }
+
 void Writer::writeTrue() {
 	out_.append("true", 4);
 }
+
 void Writer::writeFalse() {
 	out_.append("false", 5);
 }
+
 void Writer::writeInteger(const long long value) {
 	out_.append(std::to_string(value));
 }
+
 void Writer::writeDouble(const double value) {
 	string&& s = std::to_string(value);
 	while (s.back() == '0') {
@@ -640,11 +651,13 @@ void Writer::writeDouble(const double value) {
 	}
 	out_.append(s);
 }
+
 void Writer::writeString(const string& value) {
 	out_.push_back('"');
 	out_.append(value);
 	out_.push_back('"');
 }
+
 void Writer::writeArray(const Value& value) {
 	out_.push_back('[');
 	if (!value.empty()) {
@@ -656,6 +669,7 @@ void Writer::writeArray(const Value& value) {
 	}
 	out_.push_back(']');
 }
+
 void Writer::writeObject(const Value& value) {
 	out_.push_back('{');
 	if (!value.empty()) {
@@ -671,6 +685,7 @@ void Writer::writeObject(const Value& value) {
 	}
 	out_.push_back('}');
 }
+
 void Writer::writeValue(const Value& value) {
 	switch (value.type()) {
 	case null_value:writeNull(); break;
@@ -683,14 +698,17 @@ void Writer::writeValue(const Value& value) {
 	case object_value:writeObject(value); break;
 	}
 }
+
 void Writer::writeIndent() {
 	size_t i = indent_;
 	while (i--)
 		out_.push_back('\t');
 }
+
 void Writer::writeNewline() {
 	out_.push_back('\n');
 }
+
 void Writer::writeStyledArray(const Value& value) {
 	out_.push_back('[');
 	if (!value.empty()) {
@@ -710,6 +728,7 @@ void Writer::writeStyledArray(const Value& value) {
 	}
 	out_.push_back(']');
 }
+
 void Writer::writeStyledObject(const Value& value) {
 	out_.push_back('{');
 	if (!value.empty()) {
@@ -734,6 +753,7 @@ void Writer::writeStyledObject(const Value& value) {
 	}
 	out_.push_back('}');
 }
+
 void Writer::writeStyledValue(const Value& value) {
 	switch (value.type()) {
 	case null_value:writeNull(); break;

@@ -6,20 +6,23 @@ Include `Json.h` in your project<br>
 * Serialize string:
 ```cpp
 const char* str = "{}";
-Json::Value v = Json::toJson(v);
+	Json::Value v;
+Json::Reader r;
+if (!r.parse(str, v))
+	std::cerr << r.getErrorString() << std::endl;
 ```
 * Iterate over JSON objects
 ```cpp
 Json::Value v(toJson(R"({"key":"value"})"));
-for (auto& x : v.asObject())
+for (auto& x : v)
 	puts(x.second.toString().c_str());
 ```
 * Value & Assignment:
 ```cpp
 Json::Value v(toJson(R"({"key":"value"})"));
-cout << j["key"].toString() << endl;
+cout << j["key"] << endl;
 j["key"] = 0;
-cout << j["key"].toString() << endl;
+cout << j["key"] << endl;
 ```
 # Features
 1. Each Json object only occupies 16 bytes

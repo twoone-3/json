@@ -26,14 +26,18 @@ int main() {
 	"double":1e-3,
 	"double2":1.5934684576,
 	"string":"Json",
-	"array":[null , 1 , 1.0,"test",["\u621188"],{"АЁет":1}],
+	"array":[null , 1 , 1.0,"test",["\u9076"],{"АЁет":1}],
 	"object":{"key":true}
 }
 )";
 #endif
-	auto start = chrono::steady_clock::now();//
-	Value&& v = toJson(str);
-	cout << v["object"].toFastString() << endl;
+	auto start = chrono::steady_clock::now();
+	for (size_t i = 0; i < 100; i++)
+	{
+		cout << toJson(str) << endl;
+
+	}
+	//cout << v << endl;
 	chrono::duration<double> durString = chrono::steady_clock::now() - start;
 	cout << durString.count() << " seconds" << endl;
 #if file
@@ -42,4 +46,4 @@ int main() {
 #endif
 	system("pause");
 	return 0;
-}
+	}

@@ -6,20 +6,23 @@
 * 序列化字符串:
 ```cpp
 const char* str = "{}";
-Json::Value v = Json::toJson(v);
+Json::Value v;
+Json::Reader r;
+if (!r.parse(str, v))
+	std::cerr << r.getErrorString() << std::endl;
 ```
 * 遍历:
 ```cpp
 Json::Value v(toJson(R"({"key":"value"})"));
-for (auto& x : v.asObject())
+for (auto& x : v)
 	puts(x.second.toString().c_str());
 ```
 * 取值&赋值:
 ```cpp
 Json::Value v(toJson(R"({"key":"value"})"));
-cout << j["key"].toString() << endl;
+cout << j["key"] << endl;
 j["key"] = 0;
-cout << j["key"].toString() << endl;
+cout << j["key"] << endl;
 ```
 # 特点
 1. 每个Json对象仅占用16字节

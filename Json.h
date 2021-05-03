@@ -4,7 +4,6 @@
 #include <iostream>
 #include <string>
 #include <map>
-#define JSON_CHECK(x) if(!x)return false
 
 namespace Json {
 
@@ -152,17 +151,18 @@ private:
 	const char& readNextCharBack();
 	void nextChar();
 	bool readNull();
-	bool readTrue(Value& value);
-	bool readFalse(Value& value);
-	bool readNumber(Value& value);
-	bool readString(string& s);
-	bool readString(Value& value);
-	bool readArray(Value& value);
-	bool readObject(Value& value);
-	bool readValue(Value& value);
+	bool readTrue(Value&);
+	bool readFalse(Value&);
+	bool readNumber(Value&);
+	bool readString(string&);
+	bool readString(Value&);
+	bool readArray(Value&);
+	bool readObject(Value&);
+	bool readValue(Value&);
 	bool skipBlank();
 	bool readHex4(unsigned& u);
-	static void encode_utf8(unsigned& u, string& s);
+	bool readUnicode(unsigned& u);
+	static void encode_utf8(unsigned&, string&);
 
 	const char* ptr_ = nullptr;
 	const char* begin_ = nullptr;
@@ -175,22 +175,21 @@ public:
 	void writeNull();
 	void writeTrue();
 	void writeFalse();
-	void writeInteger(const long long value);
-	void writeDouble(const double value);
-	void writeString(const string& value);
-	void writeArray(const Value& value);
-	void writeObject(const Value& value);
-	void writeValue(const Value& value);
+	void writeInteger(const long long );
+	void writeDouble(const double );
+	void writeString(const string& );
+	void writeArray(const Value& );
+	void writeObject(const Value& );
+	void writeValue(const Value& );
 	void writeIndent();
 	void writeNewline();
-	void writeStyledArray(const Value& value);
-	void writeStyledObject(const Value& value);
-	void writeStyledValue(const Value& value);
+	void writeStyledArray(const Value& );
+	void writeStyledObject(const Value& );
+	void writeStyledValue(const Value& );
 private:
 	string out_;
 	size_t indent_ = 0;
 };
-
 
 std::ostream& operator<<(std::ostream&, const Value&);
 
