@@ -15,7 +15,7 @@ using ArrayIndex = unsigned long long;
 using Object = std::map<class Index, class Value>;
 
 //JSON类型枚举
-enum ValueType : char {
+enum ValueType : uint8_t {
 	null_value,
 	false_value,
 	true_value,
@@ -60,6 +60,8 @@ union Data {
 //JSON数据类型
 class Value {
 public:
+	friend class Reader;
+	friend class Writer;
 	Value();
 	Value(const bool);
 	Value(const int);
@@ -101,10 +103,6 @@ public:
 	void setObject();
 	//获取类型
 	ValueType type()const;
-	//获取内容
-	Data& data();
-	//获取内容
-	const Data& data()const;
 	//交换内容
 	void swap(Value&);
 	//移除对象的指定成员
@@ -133,6 +131,10 @@ public:
 	string toFastString()const;
 	//转换成格式化的字符串
 	string toStyledString()const;
+	//转换字符串为JSON
+	bool parse(const char* );
+	//转换字符串为JSON
+	bool parse(const string& );
 private:
 	Data data_;
 	ValueType type_ = null_value;
@@ -159,11 +161,10 @@ private:
 	bool readArray(Value&);
 	bool readObject(Value&);
 	bool readValue(Value&);
-	bool skipBlank();
+	bool readWhitespace();
 	bool readHex4(unsigned& u);
 	bool readUnicode(unsigned& u);
-	static void encode_utf8(unsigned&, string&);
-
+	
 	const char* ptr_ = nullptr;
 	const char* begin_ = nullptr;
 	const char* err_ = nullptr;
@@ -194,6 +195,3 @@ private:
 std::ostream& operator<<(std::ostream&, const Value&);
 
 }// namespace Json
-//字符串转JSON
-Json::Value toJson(const char*);
-Json::Value toJson(const std::string&);
