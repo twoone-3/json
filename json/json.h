@@ -9,8 +9,6 @@
 namespace json {
 
 class Value;
-class Reader;
-class Writer;
 
 using std::move;
 
@@ -35,12 +33,26 @@ enum ValueType :uint8_t {
 	arrayValue,		//array value (ordered list)
 	objectValue		//object value (collection of name/value pairs).
 };
+//To express JSON syntax error
+enum ErrorCode :uint8_t {
+	OK,
+	INVALID_CHARACTER,
+	INVALID_ESCAPE,
+	MISSING_QUOTE,
+	MISSING_NULL,
+	MISSING_TRUE,
+	MISSING_FALSE,
+	MISSING_COMMAS_OR_BRACKETS,
+	MISSING_COMMAS_OR_BRACES,
+	MISSING_COLON,
+	MISSING_SURROGATE_PAIR,
+	UNEXPECTED_ENDING_CHARACTER,
+};
 //A Value object can be one of the ValueTyoe
 class Value {
 public:
-	friend class Reader;
-	friend class Writer;
 	Value();
+	Value(nullptr_t);
 	Value(bool);
 	Value(Int);
 	Value(UInt);
@@ -96,14 +108,16 @@ public:
 	//清除内容
 	void clear();
 	//转换成紧凑的字符串
-	String toFastString()const;
+	String toShortString()const;
 	//转换成格式化的字符串
 	String toStyledString()const;
 	//转换字符串为JSON
-	bool parse(const char*);
+	ErrorCode parse(const char*, size_t len);
 	//转换字符串为JSON
-	bool parse(const String&);
+	ErrorCode parse(const String&);
 private:
+	ErrorCode _parseValue(const char*&);
+	void _toString(String&, UInt&, bool)const;
 	union ValueData {
 		bool b;
 		Int i;
@@ -118,53 +132,9 @@ private:
 	} data_;
 	ValueType type_;
 };
-//用于解析JSON
-class Reader {
-public:
-	Reader(const char*);
-
-	String getErrorString();
-	bool readValue(Value&);
-private:
-	const char& readChar();
-	const char& readNextCharFront();
-	const char& readNextCharBack();
-	void nextChar();
-	bool readNull();
-	bool readTrue(Value&);
-	bool readFalse(Value&);
-	bool readNumber(Value&);
-	bool readString(String&);
-	bool readString(Value&);
-	bool readArray(Value&);
-	bool readObject(Value&);
-	bool readWhitespace();
-	bool readHex4(unsigned& u);
-	bool readUnicode(unsigned& u);
-
-	const char* ptr_;
-	const char* start_;
-	const char* err_;
-};
-//用于生成JSON字符串
-class Writer {
-public:
-	Writer();
-	String getString()const;
-	void writeNumber(double);
-	void writeString(const String&);
-	void writeArray(const Value&);
-	void writeObject(const Value&);
-	void writeValue(const Value&, bool = false);
-	void writeStyledArray(const Value&);
-	void writeStyledObject(const Value&);
-	void writeIndent();
-	void writeNewline();
-private:
-	String out_;
-	size_t indent_;
-};
 //io support
 std::ostream& operator<<(std::ostream&, const Value&);
+//io support
+std::ostream& operator<<(std::ostream&, ErrorCode);
 
 }// namespace Json
