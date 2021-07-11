@@ -23,13 +23,19 @@ int main() {
 	system("chcp 65001");
 	UINT64 start = GetTickCount64();
 	for (auto& x : directory_iterator("test")) {
-		//cout << x << endl;
+		cout << "------------------" << x << endl;
 		ifstream f(x);
 		string s(ifstream::_Iter(f), {});
 		Value value;
 		value.parse(s);
 		cout << value << endl;
 	}
+	//for (unsigned i = 0; i != 1000; ++i) {
+	//	Value value;
+	//	value.parse(testjson);
+	//	cout << value << endl;
+	//}
+
 	UINT64 end = GetTickCount64();
 
 	cout << end - start << "ms" << endl;

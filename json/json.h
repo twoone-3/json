@@ -4,6 +4,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <cassert>
+#include <charconv>
 #include <map>
 
 namespace json {
@@ -112,7 +114,7 @@ public:
 	//转换成格式化的字符串
 	String toStyledString()const;
 	//转换字符串为JSON
-	ErrorCode parse(const char*, size_t len);
+	ErrorCode parse(const char*);
 	//转换字符串为JSON
 	ErrorCode parse(const String&);
 private:
