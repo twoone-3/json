@@ -27,7 +27,7 @@ int main() {
 	for (auto& x : directory_iterator("test")) {
 		cout << x << endl;
 		ifstream f(x);
-		string s(ifstream::_Iter(f), {});
+		string s(istreambuf_iterator<char>(f), {});
 		Value value;
 		Value::Parser p;
 		if (!p.parse(s, value))

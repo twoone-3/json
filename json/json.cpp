@@ -1,10 +1,13 @@
 ﻿#include "json.h"
+#include <charconv>
+
+#define JSON_UTF8 0
+#define JSON_INDENT 4
 
 #define JSON_CHECK(expr) if (!(expr))return false;
 #define JSON_SKIP for (char c = *cur_; (c == ' ' || c == '\t' || c == '\n' || c == '\r') && cur_ != end_;c = *++cur_);
 #define JSON_CHECK_END if (cur_ == end_)return false;
-#define JSON_ASSERT(expr) if (!(expr))abort();
-#define JSON_UTF8 0
+#define JSON_ASSERT(expr) if (!(expr))exit(-1);
 
 namespace json {
 static void CodePointToUTF8(String& s, UInt u) {
@@ -108,79 +111,14 @@ static void writeHex16Bit(String& s, UInt u) {
 	s += hex2[2 * lo];
 	s += hex2[2 * lo + 1];
 }
-static void writeString(String& out, const String& str) {
-	out += '"';
-	if (hasEsecapingChar(str))
-		for (auto& c : str) {
-			UInt codepoint;
-			switch (c) {
-			case '\"':
-				out += '\\';
-				out += '"';
-				break;
-			case '\\':
-				out += '\\';
-				out += '\\';
-				break;
-			case '\b':
-				out += '\\';
-				out += 'b';
-				break;
-			case '\f':
-				out += '\\';
-				out += 'f';
-				break;
-			case '\n':
-				out += '\\';
-				out += 'n';
-				break;
-			case '\r':
-				out += '\\';
-				out += 'r';
-				break;
-			case '\t':
-				out += '\\';
-				out += 't';
-				break;
-			default:
-#if JSON_UTF8
-				if (uint8_t(c) < 0x20)
-					out.append("\\u").append(writeHex16Bit(c));
-				else
-					out += c);
-#else
-				codepoint = UTF8ToCodepoint(&c, &*str.end()); // modifies `c`
-				if (codepoint < 0x20) {
-					out += "\\u";
-					writeHex16Bit(out,codepoint);
-				}
-				else if (codepoint < 0x80) {
-					out += static_cast<char>(codepoint);
-				}
-				else if (codepoint < 0x10000) {
-					// Basic Multilingual Plane
-					out += "\\u";
-					writeHex16Bit(out, codepoint);
-				}
-				else {
-					// Extended Unicode. Encode 20 bits as a surrogate pair.
-					codepoint -= 0x10000;
-					out += "\\u";
-					writeHex16Bit(out,0xD800 + ((codepoint >> 10) & 0x3FF));
-					writeHex16Bit(out,0xDC00 + (codepoint & 0x3FF));
-				}
-#endif
-				break;
-			}
-		}
-	else
-		out.append(str);
-	out += '"';
-}
+
 bool Value::Parser::parse(const String& str, Value& value) {
-	cur_ = str.c_str();
-	begin_ = str.c_str();
-	end_ = str.c_str() + str.length();
+	return parse(str.c_str(), str.length(), value);
+}
+bool Value::Parser::parse(const char* str, size_t len, Value& value) {
+	cur_ = str;
+	begin_ = str;
+	end_ = str + len;
 	//Skip whitespace
 	JSON_SKIP; JSON_CHECK_END;
 	bool res = parseValue(value);
@@ -243,17 +181,18 @@ bool Value::Parser::parseString(Value& value) {
 	return parseString(*value.data_.s);
 }
 bool Value::Parser::parseString(String& s) {
+	char c;
 	for (;;) {
 		// "xxxx"
 		// ^
-		char ch = *++cur_;
-		if (!ch)
+		c = *++cur_;
+		if (!c)
 			return error("missing '\"'");
-		else if (ch == '"') {
+		else if (c == '"') {
 			++cur_;
 			return true;
 		}
-		else if (ch == '\\') {
+		else if (c == '\\') {
 			// "xx\nxx"
 			//    ^
 			switch (*++cur_) {
@@ -289,7 +228,7 @@ bool Value::Parser::parseString(String& s) {
 			}
 		}
 		else
-			s += ch;
+			s += c;
 	}
 	return false;
 }
@@ -405,6 +344,183 @@ bool Value::Parser::error(const char* err) {
 	err_ = err;
 	return false;
 }
+
+void Value::Writer::write(const Value& value, bool styled) {
+	switch (value.type_) {
+	case NULL_T:return writeNull();
+	case INT_T:return writeInt(value);
+	case UINT_T:return writeUInt(value);
+	case REAL_T:return writeDouble(value);
+	case STRING_T:return writeString(value);
+	case BOOL_T:return writeBool(value);
+	case ARRAY_T:return styled ? writePrettyArray(value) : writeArray(value);
+	case OBJECT_T:return styled ? writePrettyObject(value) : writeObject(value);
+	}
+}
+String Value::Writer::getOutput() {
+	return out_;
+}
+void Value::Writer::writeIndent() {
+	out_.append(indent_ * JSON_INDENT, ' ');
+}
+void Value::Writer::writeNull() {
+	out_.append("null", 4);
+}
+void Value::Writer::writeBool(const Value& value) {
+	value.data_.b ? out_.append("true", 4) : out_.append("false", 5);
+}
+void Value::Writer::writeInt(const Value& value) {
+	char buffer[21]{ 0 };
+	std::to_chars(buffer, buffer + sizeof buffer, value.data_.i64);
+	out_.append(buffer);
+}
+void Value::Writer::writeUInt(const Value& value) {
+	char buffer[21]{ 0 };
+	std::to_chars(buffer, buffer + sizeof buffer, value.data_.u64);
+	out_.append(buffer);
+}
+void Value::Writer::writeDouble(const Value& value) {
+	char buffer[21]{ 0 };
+	std::to_chars(buffer, buffer + sizeof buffer, value.data_.d);
+	out_.append(buffer);
+}
+void Value::Writer::writeString(const Value& value) {
+	const String& str = *value.data_.s;
+	out_ += '"';
+	if (hasEsecapingChar(str))
+		for (auto& c : str) {
+			UInt codepoint;
+			switch (c) {
+			case '\"':
+				out_ += '\\';
+				out_ += '"';
+				break;
+			case '\\':
+				out_ += '\\';
+				out_ += '\\';
+				break;
+			case '\b':
+				out_ += '\\';
+				out_ += 'b';
+				break;
+			case '\f':
+				out_ += '\\';
+				out_ += 'f';
+				break;
+			case '\n':
+				out_ += '\\';
+				out_ += 'n';
+				break;
+			case '\r':
+				out_ += '\\';
+				out_ += 'r';
+				break;
+			case '\t':
+				out_ += '\\';
+				out_ += 't';
+				break;
+			default:
+#if JSON_UTF8
+				if (uint8_t(c) < 0x20)
+					out_.append("\\u").append(writeHex16Bit(c));
+				else
+					out_ += c);
+#else
+				codepoint = UTF8ToCodepoint(&c, &*str.end()); // modifies `c`
+				if (codepoint < 0x20) {
+					out_ += "\\u";
+					writeHex16Bit(out_, codepoint);
+				}
+				else if (codepoint < 0x80) {
+					out_ += static_cast<char>(codepoint);
+				}
+				else if (codepoint < 0x10000) {
+					// Basic Multilingual Plane
+					out_ += "\\u";
+					writeHex16Bit(out_, codepoint);
+				}
+				else {
+					// Extended Unicode. Encode 20 bits as a surrogate pair.
+					codepoint -= 0x10000;
+					out_ += "\\u";
+					writeHex16Bit(out_, 0xD800 + ((codepoint >> 10) & 0x3FF));
+					writeHex16Bit(out_, 0xDC00 + (codepoint & 0x3FF));
+				}
+#endif
+				break;
+			}
+		}
+	else
+		out_.append(str);
+	out_ += '"';
+}
+void Value::Writer::writeArray(const Value& value) {
+	out_ += '[';
+	if (!value.empty()) {
+		for (auto& x : *value.data_.a) {
+			write(x, false);
+			out_ += ',';
+		}
+		out_.pop_back();
+	}
+	out_ += ']';
+
+}
+void Value::Writer::writeObject(const Value& value) {
+	out_ += '{';
+	if (!value.empty()) {
+		for (auto& x : *value.data_.o) {
+			writeString(x.first);
+			out_ += ':';
+			write(x.second, false);
+			out_ += ',';
+		}
+		out_.pop_back();
+	}
+	out_ += '}';
+}
+void Value::Writer::writePrettyArray(const Value& value) {
+	out_ += '[';
+	if (!value.empty()) {
+		out_ += '\n';
+		++indent_;
+		for (auto& x : *value.data_.a) {
+			writeIndent();
+			write(x, true);
+			out_ += ',';
+			out_ += '\n';
+		}
+		--indent_;
+		out_.pop_back();
+		out_.pop_back();
+		out_ += '\n';
+		writeIndent();
+	}
+	out_ += ']';
+}
+void Value::Writer::writePrettyObject(const Value& value) {
+	out_ += '{';
+	if (!value.empty()) {
+		out_ += '\n';
+		++indent_;
+		for (auto& x : *value.data_.o) {
+			writeIndent();
+			writeString(x.first);
+			out_ += ':';
+			out_ += ' ';
+			write(x.second, true);
+			out_ += ',';
+			out_ += '\n';
+		}
+		--indent_;
+		out_.pop_back();
+		out_.pop_back();
+		out_ += '\n';
+		writeIndent();
+	}
+	out_ += '}';
+}
+
 Value::Value() : type_(NULL_T) { data_.u64 = 0; }
 Value::Value(nullptr_t) : type_(NULL_T) { data_.u64 = 0; }
 Value::Value(bool b) : type_(BOOL_T) { data_.u64 = b; }
@@ -416,7 +532,7 @@ Value::Value(Float num) : type_(REAL_T) { data_.d = num; }
 Value::Value(Double num) : type_(REAL_T) { data_.d = num; }
 Value::Value(const char* s) : type_(STRING_T) { data_.s = new String(s); }
 Value::Value(const String& s) : type_(STRING_T) { data_.s = new String(s); }
-Value::Value(const ValueType type) : type_(type) {
+Value::Value(ValueType type) : type_(type) {
 	data_.u64 = 0;
 	switch (type_) {
 	case NULL_T:
@@ -672,119 +788,17 @@ void Value::clear() {
 	type_ = NULL_T;
 }
 String Value::toShortString()const {
-	String out;
-	UInt indent = 0;
-	_toString(out, indent, false);
-	return out;
+	Writer w;
+	w.write(*this, false);
+	return w.getOutput();
 }
 String Value::toStyledString()const {
-	String out;
-	UInt indent = 0;
-	_toString(out, indent, true);
-	return out;
+	Writer w;
+	w.write(*this, true);
+	return w.getOutput();
 }
-void Value::_toString(String& out, UInt& indent, bool styled)const {
-	switch (type_) {
-	case NULL_T:
-		out.append("null", 4);
-		break;
-	case INT_T: {
-		char buffer[21]{ 0 };
-		std::to_chars(buffer, buffer + sizeof buffer, data_.i64);
-		out.append(buffer);
-		break;
-	}
-	case UINT_T: {
-		char buffer[21]{ 0 };
-		std::to_chars(buffer, buffer + sizeof buffer, data_.u64);
-		out.append(buffer);
-		break;
-	}
-	case REAL_T: {
-		char buffer[21]{ 0 };
-		std::to_chars(buffer, buffer + sizeof buffer, data_.d);
-		out.append(buffer);
-		break;
-	}
-	case STRING_T:
-		writeString(out, *data_.s);
-		break;
-	case BOOL_T:
-		asBool() ? out.append("true", 4) : out.append("false", 5);
-		break;
-	case ARRAY_T:
-		if (styled) {
-			out += '[';
-			if (!empty()) {
-				out += '\n';
-				++indent;
-				for (auto& x : *data_.a) {
-					out.append(indent, '\t');
-					x._toString(out, indent, styled);
-					out += ',';
-					out += '\n';
-				}
-				--indent;
-				out.pop_back();
-				out.pop_back();
-				out += '\n';
-				out.append(indent, '\t');
-			}
-			out += ']';
-		}
-		else {
-			out += '[';
-			if (!empty()) {
-				for (auto& x : *data_.a) {
-					x._toString(out, indent, styled);
-					out += ',';
-				}
-				out.pop_back();
-			}
-			out += ']';
-		}
-		break;
-	case OBJECT_T:
-		if (styled) {
-			out += '{';
-			if (!empty()) {
-				out += '\n';
-				++indent;
-				for (auto& x : *data_.o) {
-					out.append(indent, '\t');
-					writeString(out, x.first);
-					out += ':';
-					out += ' ';
-					x.second._toString(out, indent, styled);
-					out += ',';
-					out += '\n';
-				}
-				--indent;
-				out.pop_back();
-				out.pop_back();
-				out += '\n';
-				out.append(indent, '\t');
-			}
-			out += '}';
-		}
-		else {
-			out += '{';
-			if (!empty()) {
-				for (auto& x : *data_.o) {
-					writeString(out, x.first);
-					out += ':';
-					x.second._toString(out, indent, styled);
-					out += ',';
-				}
-				out.pop_back();
-			}
-			out += '}';
-		}
-		break;
-	default:
-		break;
-	}
-
+Value::operator String()const {
+	return toShortString();
 }
 std::ostream& operator<<(std::ostream& os, const Value& value) {
 	return os << value.toStyledString();

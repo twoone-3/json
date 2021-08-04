@@ -14,16 +14,22 @@ Readme:
 
 */
 #pragma once
-#include <iostream>
-#include <string>
-#include <string_view>
-#include <vector>
-#include <map>
-#include <charconv>
 
-#if !_HAS_CXX17
+#if defined(__clang__) || defined(__GNUC__)
+#define CPP_STANDARD __cplusplus
+#elif defined(_MSC_VER)
+#define CPP_STANDARD _MSVC_LANG
+#endif
+
+#if CPP_STANDARD < 201703L
 #error json.h require c++17 <charconv> <string_view>
 #endif
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <map>
+
 namespace json {
 
 class Value;
@@ -69,6 +75,7 @@ public:
 	class Parser {
 	public:
 		bool parse(const String&, Value&);
+		bool parse(const char*, size_t, Value&);
 		String getError();
 	private:
 		bool parseValue(Value&);
@@ -87,6 +94,25 @@ public:
 		const char* end_ = nullptr;
 		const char* err_ = "unknown";
 	};
+	class Writer {
+	public:
+		void write(const Value&, bool);
+		String getOutput();
+	private:
+		void writeIndent();
+		void writeNull();
+		void writeBool(const Value&);
+		void writeInt(const Value&);
+		void writeUInt(const Value&);
+		void writeDouble(const Value&);
+		void writeString(const Value&);
+		void writeArray(const Value&);
+		void writeObject(const Value&);
+		void writePrettyArray(const Value&);
+		void writePrettyObject(const Value&);
+		String out_;
+		UInt indent_ = 0;
+	};
 	Value();
 	Value(nullptr_t);
 	Value(bool);
@@ -98,7 +124,7 @@ public:
 	Value(Double);
 	Value(const char*);
 	Value(const String&);
-	Value(const ValueType);
+	Value(ValueType);
 	Value(const Value&);
 	Value(Value&&)noexcept;
 	~Value();
@@ -147,8 +173,9 @@ public:
 	String toShortString()const;
 	//转换成格式化的字符串
 	String toStyledString()const;
+	//automatic conversion
+	operator String()const;
 private:
-	void _toString(String&, UInt&, bool)const;
 	ValueData data_;
 	ValueType type_;
 };
