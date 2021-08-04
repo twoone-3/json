@@ -1,61 +1,33 @@
 ﻿#include "json.h"
 
-#define JSON_CHECK(expression) do { ErrorCode tmp = expression; if (tmp != OK)return tmp; } while (0)
-#define JSON_SKIP JSON_CHECK(skipWhiteSpace(cur))
+#define JSON_CHECK(expr) if (!(expr))return false;
+#define JSON_SKIP for (char c = *cur_; (c == ' ' || c == '\t' || c == '\n' || c == '\r') && cur_ != end_;c = *++cur_);
+#define JSON_CHECK_END if (cur_ == end_)return false;
+#define JSON_ASSERT(expr) if (!(expr))abort();
 #define JSON_UTF8 0
 
 namespace json {
-static constexpr const char* ErrorToString(ErrorCode code) {
-	switch (code) {
-	case json::OK:
-		return "OK";
-	case json::INVALID_CHARACTER:
-		return "Invalid character";
-	case json::INVALID_ESCAPE:
-		return "Invalid escape";
-	case json::MISSING_QUOTE:
-		return "Missing '\"'";
-	case json::MISSING_NULL:
-		return "Missing 'null'";
-	case json::MISSING_TRUE:
-		return "Missing 'true'";
-	case json::MISSING_FALSE:
-		return "Missing 'false'";
-	case json::MISSING_COMMAS_OR_BRACKETS:
-		return "Missing ',' or ']'";
-	case json::MISSING_COMMAS_OR_BRACES:
-		return "Missing ',' or '}'";
-	case json::MISSING_COLON:
-		return "Missing ':'";
-	case json::MISSING_SURROGATE_PAIR:
-		return "Missing another '\\u' token to begin the second half of a unicode surrogate pair";
-	case json::UNEXPECTED_ENDING_CHARACTER:
-		return "Unexpected '\\0'";
-	default:
-		return "Unknow";
-	}
-}
 static void CodePointToUTF8(String& s, UInt u) {
 	if (u <= 0x7F)
-		s += (u & 0xFF);
+		s += static_cast<char>(u & 0xFF);
 	else if (u <= 0x7FF) {
-		s += (0xC0 | (0xFF & (u >> 6)));
-		s += (0x80 | (0x3F & u));
+		s += static_cast<char>(0xC0 | (0xFF & (u >> 6)));
+		s += static_cast<char>(0x80 | (0x3F & u));
 	}
 	else if (u <= 0xFFFF) {
-		s += (0xE0 | (0xFF & (u >> 12)));
-		s += (0x80 | (0x3F & (u >> 6)));
-		s += (0x80 | (0x3F & u));
+		s += static_cast<char>(0xE0 | (0xFF & (u >> 12)));
+		s += static_cast<char>(0x80 | (0x3F & (u >> 6)));
+		s += static_cast<char>(0x80 | (0x3F & u));
 	}
 	else {
-		s += (0xF0 | (0xFF & (u >> 18)));
-		s += (0x80 | (0x3F & (u >> 12)));
-		s += (0x80 | (0x3F & (u >> 6)));
-		s += (0x80 | (0x3F & u));
+		s += static_cast<char>(0xF0 | (0xFF & (u >> 18)));
+		s += static_cast<char>(0x80 | (0x3F & (u >> 12)));
+		s += static_cast<char>(0x80 | (0x3F & (u >> 6)));
+		s += static_cast<char>(0x80 | (0x3F & u));
 	}
 }
 static bool hasEsecapingChar(const String& str) {
-	for (auto c : str) {
+	for (auto& c : str) {
 		if (c == '\\' || c == '"' || c < 0x20 || c > 0x7F)
 			return true;
 	}
@@ -111,7 +83,7 @@ static UInt UTF8ToCodepoint(const char* s, const char* e) {
 
 	return REPLACEMENT_CHARACTER;
 }
-static String toHex16Bit(UInt x) {
+static void writeHex16Bit(String& s, UInt u) {
 	constexpr const char hex2[] =
 		"000102030405060708090a0b0c0d0e0f"
 		"101112131415161718191a1b1c1d1e1f"
@@ -129,131 +101,17 @@ static String toHex16Bit(UInt x) {
 		"d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
 		"e0e1e2e3e4e5e6e7e8e9eaebecedeeef"
 		"f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
-	const UInt hi = (x >> 8) & 0xff;
-	const UInt lo = x & 0xff;
-	String out(4, ' ');
-	out[0] = hex2[2 * hi];
-	out[1] = hex2[2 * hi + 1];
-	out[2] = hex2[2 * lo];
-	out[3] = hex2[2 * lo + 1];
-	return out;
-}
-static ErrorCode skipWhiteSpace(const char*& cur) {
-	for (;;) {
-		switch (*cur) {
-		case'\t':break;
-		case'\n':break;
-		case'\r':break;
-		case' ':break;
-#if 0
-		case'/':
-			++cur;
-			//单行注释
-			if (*cur == '/') {
-				++cur;
-				while (*cur != '\n') {
-					++cur;
-				}
-			}
-			//多行注释
-			else if (*cur == '*') {
-				++cur;
-				while (*cur != '*' || cur[1] != '/') {
-					if (*cur == '\0') {
-						return error_ = "Missing '*/'", false;
-					}
-					++cur;
-				}
-				++cur;
-			}
-			else
-				return error_ = "Invalid comment", false;
-			break;
-#endif
-		default:
-			return OK;
-		}
-		++cur;
-	}
-}
-static ErrorCode parseHex4(const char*& cur, UInt& u) {
-	//u = 0;
-	char ch = 0;
-	for (UInt i = 0; i < 4; ++i) {
-		u <<= 4;
-		// cur:
-		// "x\u0123x"
-		//    ^
-		ch = *++cur;
-		if (ch >= '0' && ch <= '9')
-			u |= ch - '0';
-		else if (ch >= 'a' && ch <= 'f')
-			u |= ch - 'a' + 10;
-		else if (ch >= 'A' && ch <= 'F')
-			u |= ch - 'A' + 10;
-		else
-			return INVALID_CHARACTER;
-	}
-	return OK;
-}
-static ErrorCode parseString(const char*& cur, String& s) {
-	for (;;) {
-		// cur:
-		// "xxxx"
-		// ^
-		char ch = *++cur;
-		if (!ch)
-			return MISSING_QUOTE;
-		else if (ch == '"') {
-			++cur;
-			return OK;
-		}
-		else if (ch == '\\') {
-			// cur:
-			// "xx\nxx"
-			//    ^
-			switch (*++cur) {
-			case '"': s += '"'; break;
-			case 'n': s += '\n'; break;
-			case 'r': s += '\r'; break;
-			case 't': s += '\t'; break;
-			case 'f': s += '\f'; break;
-			case 'b': s += '\b'; break;
-			case '/': s += '/'; break;
-			case '\\': s += '\\'; break;
-			case 'u': {
-				UInt u = 0;
-				JSON_CHECK(parseHex4(cur, u));
-				if (u >= 0xD800 && u <= 0xDBFF) {
-					// cur:
-					// "x\u0123\u0234xx"
-					//        ^
-					if (cur[1] == '\\' && cur[2] == 'u') {
-						cur += 2;
-						UInt surrogatePair = 0;
-						if (!parseHex4(cur, surrogatePair))
-							u = 0x10000 + ((u & 0x3FF) << 10) + (surrogatePair & 0x3FF);
-						else
-							return INVALID_CHARACTER;
-					}
-					else
-						return MISSING_SURROGATE_PAIR;
-				}
-				CodePointToUTF8(s, u);
-			}break;
-			default:
-				return INVALID_ESCAPE;
-			}
-		}
-		else
-			s += ch;
-	}
-	return OK;
+	const UInt hi = (u >> 8) & 0xFF;
+	const UInt lo = u & 0xFF;
+	s += hex2[2 * hi];
+	s += hex2[2 * hi + 1];
+	s += hex2[2 * lo];
+	s += hex2[2 * lo + 1];
 }
 static void writeString(String& out, const String& str) {
 	out += '"';
 	if (hasEsecapingChar(str))
-		for (auto c : str) {
+		for (auto& c : str) {
 			UInt codepoint;
 			switch (c) {
 			case '\"':
@@ -287,26 +145,29 @@ static void writeString(String& out, const String& str) {
 			default:
 #if JSON_UTF8
 				if (uint8_t(c) < 0x20)
-					out.append("\\u").append(toHex16Bit(c));
+					out.append("\\u").append(writeHex16Bit(c));
 				else
 					out += c);
 #else
 				codepoint = UTF8ToCodepoint(&c, &*str.end()); // modifies `c`
 				if (codepoint < 0x20) {
-					out.append("\\u").append(toHex16Bit(codepoint));
+					out += "\\u";
+					writeHex16Bit(out,codepoint);
 				}
 				else if (codepoint < 0x80) {
 					out += static_cast<char>(codepoint);
 				}
 				else if (codepoint < 0x10000) {
 					// Basic Multilingual Plane
-					out.append("\\u").append(toHex16Bit(codepoint));
+					out += "\\u";
+					writeHex16Bit(out, codepoint);
 				}
 				else {
 					// Extended Unicode. Encode 20 bits as a surrogate pair.
 					codepoint -= 0x10000;
-					out.append("\\u").append(toHex16Bit(0xd800 + ((codepoint >> 10) & 0x3ff)));
-					out.append("\\u").append(toHex16Bit(0xdc00 + (codepoint & 0x3ff)));
+					out += "\\u";
+					writeHex16Bit(out,0xD800 + ((codepoint >> 10) & 0x3FF));
+					writeHex16Bit(out,0xDC00 + (codepoint & 0x3FF));
 				}
 #endif
 				break;
@@ -316,37 +177,265 @@ static void writeString(String& out, const String& str) {
 		out.append(str);
 	out += '"';
 }
-Value::Value() :type_(nullValue) { data_.u64 = 0; }
-Value::Value(nullptr_t) : type_(nullValue) { data_.u64 = 0; }
-Value::Value(bool b) : type_(booleanValue) { data_.u64 = b; }
-Value::Value(Int num) : type_(intValue) { data_.i64 = num; }
-Value::Value(UInt num) : type_(uintValue) { data_.u64 = num; }
-Value::Value(Int64 num) : type_(intValue) { data_.i64 = num; }
-Value::Value(UInt64 num) : type_(uintValue) { data_.u64 = num; }
-Value::Value(Float num) : type_(realValue) { data_.d = num; }
-Value::Value(Double num) : type_(realValue) { data_.d = num; }
-Value::Value(const char* s) : type_(stringValue) { data_.s = new String(s); }
-Value::Value(const String& s) : type_(stringValue) { data_.s = new String(s); }
+bool Value::Parser::parse(const String& str, Value& value) {
+	cur_ = str.c_str();
+	begin_ = str.c_str();
+	end_ = str.c_str() + str.length();
+	//Skip whitespace
+	JSON_SKIP; JSON_CHECK_END;
+	bool res = parseValue(value);
+	JSON_SKIP;
+	if (cur_ != end_)
+		return error("Extra characters");
+	return res;
+}
+String Value::Parser::getError() {
+	String e;
+	e += err_;
+	e += " in line ";
+	size_t line = 1;
+	for (const char* i = begin_; i != cur_; ++i) {
+		if (*i == '\n')
+			++line;
+	}
+	char buffer[21]{ 0 };
+	std::to_chars(buffer, buffer + sizeof buffer, line);
+	e += buffer;
+	return e;
+}
+bool Value::Parser::parseValue(Value& value) {
+	switch (*cur_) {
+	case 'n':return parseNull(value);
+	case 't':return parseTrue(value);
+	case 'f':return parseFalse(value);
+	case '[':return parseArray(value);
+	case '{':return parseObject(value);
+	case '"':return parseString(value);
+	default:return parseNumber(value);
+	}
+}
+bool Value::Parser::parseNull(Value& value) {
+	if (cur_[1] == 'u' && cur_[2] == 'l' && cur_[3] == 'l') {
+		cur_ += 4;
+		value = nullptr;
+		return true;
+	}
+	return false;
+}
+bool Value::Parser::parseTrue(Value& value) {
+	if (cur_[1] == 'r' && cur_[2] == 'u' && cur_[3] == 'e') {
+		cur_ += 4;
+		value = true;
+		return true;
+	}
+	return false;
+}
+bool Value::Parser::parseFalse(Value& value) {
+	if (cur_[1] == 'a' && cur_[2] == 'l' && cur_[3] == 's' && cur_[4] == 'e') {
+		cur_ += 5;
+		value = false;
+		return true;
+	}
+	return false;
+}
+bool Value::Parser::parseString(Value& value) {
+	value = STRING_T;
+	return parseString(*value.data_.s);
+}
+bool Value::Parser::parseString(String& s) {
+	for (;;) {
+		// "xxxx"
+		// ^
+		char ch = *++cur_;
+		if (!ch)
+			return error("missing '\"'");
+		else if (ch == '"') {
+			++cur_;
+			return true;
+		}
+		else if (ch == '\\') {
+			// "xx\nxx"
+			//    ^
+			switch (*++cur_) {
+			case '"': s += '"'; break;
+			case 'n': s += '\n'; break;
+			case 'r': s += '\r'; break;
+			case 't': s += '\t'; break;
+			case 'f': s += '\f'; break;
+			case 'b': s += '\b'; break;
+			case '/': s += '/'; break;
+			case '\\': s += '\\'; break;
+			case 'u': {
+				UInt u = 0;
+				JSON_CHECK(parseHex4(u));
+				if (u >= 0xD800 && u <= 0xDBFF) {
+					// "x\u0123\u0234xx"
+					//        ^
+					if (cur_[1] == '\\' && cur_[2] == 'u') {
+						cur_ += 2;
+						UInt surrogatePair = 0;
+						if (!parseHex4(surrogatePair))
+							u = 0x10000 + ((u & 0x3FF) << 10) + (surrogatePair & 0x3FF);
+						else
+							return error("invalid character");
+					}
+					else
+						return error("missing surrogate pair");
+				}
+				CodePointToUTF8(s, u);
+			}break;
+			default:
+				return error("invalid escape");
+			}
+		}
+		else
+			s += ch;
+	}
+	return false;
+}
+bool Value::Parser::parseHex4(UInt& u) {
+	//u = 0;
+	char ch = 0;
+	for (UInt i = 0; i < 4; ++i) {
+		u <<= 4;
+		// "x\u0123x"
+		//    ^
+		ch = *++cur_;
+		if (ch >= '0' && ch <= '9')
+			u |= ch - '0';
+		else if (ch >= 'a' && ch <= 'f')
+			u |= ch - 'a' + 10;
+		else if (ch >= 'A' && ch <= 'F')
+			u |= ch - 'A' + 10;
+		else
+			return error("invalid character");
+	}
+	return true;
+}
+bool Value::Parser::parseArray(Value& value) {
+	++cur_;
+	JSON_SKIP;
+	value = ARRAY_T;
+	if (*cur_ == ']') {
+		++cur_;
+		return true;
+	}
+	for (;;) {
+		value.data_.a->push_back({});
+		JSON_SKIP;
+		JSON_CHECK(parseValue(value.data_.a->back()));
+		JSON_SKIP;
+		if (*cur_ == ',')
+			++cur_;
+		else if (*cur_ == ']') {
+			++cur_; return true;
+		}
+		else
+			return error("misng ',' or ']'");
+	}
+	return false;
+}
+bool Value::Parser::parseObject(Value& value) {
+	++cur_;
+	JSON_SKIP;
+	value = OBJECT_T;
+	if (*cur_ == '}') {
+		++cur_;
+		return true;
+	}
+	for (;;) {
+		String key;
+		JSON_SKIP;
+		if (*cur_ != '"') {
+			return error("missing '\"'");
+		}
+		JSON_CHECK(parseString(key));
+		JSON_SKIP;
+		if (*cur_ != ':') {
+			return error("missing ':'");
+		}
+		++cur_;
+		JSON_SKIP;
+		JSON_CHECK(parseValue(value.data_.o->operator[](key)));
+		JSON_SKIP;
+		if (*cur_ == ',')
+			++cur_;
+		else if (*cur_ == '}') {
+			++cur_; return true;
+		}
+		else
+			return error("misng ',' or '}'");
+	}
+	return false;
+}
+bool Value::Parser::parseNumber(Value& value) {
+	const char* p = cur_;
+	// stopgap for already consumed character
+	char c = *p;
+	// skip '-'
+	if (c == '-')
+		c = *++p;
+	// integral part
+	while (c >= '0' && c <= '9')
+		c = *++p;
+	// fractional part
+	if (c == '.') {
+		c = *++p;
+		while (c >= '0' && c <= '9')
+			c = *++p;
+	}
+	// exponential part
+	if (c == 'e' || c == 'E') {
+		c = *++p;
+		if (c == '+' || c == '-')
+			c = *++p;
+		while (c >= '0' && c <= '9')
+			c = *++p;
+	}
+	// check out of range
+	if (c == '\0')
+		return error("unexpected_ending_character");
+	double num;
+	std::from_chars(cur_, p, num);
+	cur_ = p;
+	value = num;
+	return true;
+}
+bool Value::Parser::error(const char* err) {
+	err_ = err;
+	return false;
+}
+Value::Value() : type_(NULL_T) { data_.u64 = 0; }
+Value::Value(nullptr_t) : type_(NULL_T) { data_.u64 = 0; }
+Value::Value(bool b) : type_(BOOL_T) { data_.u64 = b; }
+Value::Value(Int num) : type_(INT_T) { data_.i64 = num; }
+Value::Value(UInt num) : type_(UINT_T) { data_.u64 = num; }
+Value::Value(Int64 num) : type_(INT_T) { data_.i64 = num; }
+Value::Value(UInt64 num) : type_(UINT_T) { data_.u64 = num; }
+Value::Value(Float num) : type_(REAL_T) { data_.d = num; }
+Value::Value(Double num) : type_(REAL_T) { data_.d = num; }
+Value::Value(const char* s) : type_(STRING_T) { data_.s = new String(s); }
+Value::Value(const String& s) : type_(STRING_T) { data_.s = new String(s); }
 Value::Value(const ValueType type) : type_(type) {
 	data_.u64 = 0;
 	switch (type_) {
-	case nullValue:
+	case NULL_T:
 		break;
-	case intValue:
+	case INT_T:
 		break;
-	case uintValue:
+	case UINT_T:
 		break;
-	case realValue:
+	case REAL_T:
 		break;
-	case stringValue:
+	case STRING_T:
 		data_.s = new String;
 		break;
-	case booleanValue:
+	case BOOL_T:
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		data_.a = new Array;
 		break;
-	case objectValue:
+	case OBJECT_T:
 		data_.o = new Object;
 		break;
 	default:
@@ -357,27 +446,27 @@ Value::Value(const Value& other) {
 	data_.u64 = 0;
 	type_ = other.type_;
 	switch (other.type_) {
-	case nullValue:
+	case NULL_T:
 		break;
-	case intValue:
+	case INT_T:
 		data_.i64 = other.data_.i64;
 		break;
-	case uintValue:
+	case UINT_T:
 		data_.u64 = other.data_.u64;
 		break;
-	case realValue:
+	case REAL_T:
 		data_.d = other.data_.d;
 		break;
-	case stringValue:
+	case STRING_T:
 		data_.s = new String(*other.data_.s);
 		break;
-	case booleanValue:
+	case BOOL_T:
 		data_.b = other.data_.b;
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		data_.a = new Array(*other.data_.a);
 		break;
-	case objectValue:
+	case OBJECT_T:
 		data_.o = new Object(*other.data_.o);
 		break;
 	default:
@@ -387,34 +476,34 @@ Value::Value(const Value& other) {
 Value::Value(Value&& other)noexcept {
 	data_ = other.data_;
 	type_ = other.type_;
-	other.type_ = nullValue;
+	other.type_ = NULL_T;
 	other.data_.u64 = 0;
 };
 Value::~Value() {
 	switch (type_) {
-	case nullValue:
+	case NULL_T:
 		break;
-	case intValue:
+	case INT_T:
 		break;
-	case uintValue:
+	case UINT_T:
 		break;
-	case realValue:
+	case REAL_T:
 		break;
-	case stringValue:
+	case STRING_T:
 		delete data_.s;
 		break;
-	case booleanValue:
+	case BOOL_T:
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		delete data_.a;
 		break;
-	case objectValue:
+	case OBJECT_T:
 		delete data_.o;
 		break;
 	default:
 		break;
 	}
-	type_ = nullValue;
+	type_ = NULL_T;
 }
 Value& Value::operator=(const Value& other) {
 	return operator=(Value(other));
@@ -427,21 +516,21 @@ bool Value::equal(const Value& other)const {
 	if (type_ != other.type_)
 		return false;
 	switch (type_) {
-	case nullValue:
-		return OK;
-	case intValue:
+	case NULL_T:
+		return true;
+	case INT_T:
 		return data_.i64 == other.data_.i64;
-	case uintValue:
+	case UINT_T:
 		return data_.u64 == other.data_.u64;
-	case realValue:
+	case REAL_T:
 		return data_.d == other.data_.d;
-	case stringValue:
+	case STRING_T:
 		return *data_.s == *other.data_.s;
-	case booleanValue:
+	case BOOL_T:
 		return data_.b == other.data_.b;
-	case arrayValue:
+	case ARRAY_T:
 		return *data_.a == *other.data_.a;
-	case objectValue:
+	case OBJECT_T:
 		return *data_.o == *other.data_.o;
 	default:
 		break;
@@ -452,39 +541,39 @@ bool Value::operator==(const Value& other)const {
 	return equal(other);
 }
 Value& Value::operator[](const String& index) {
-	assert(isObject() || isNull());
+	JSON_ASSERT(isObject() || isNull());
 	if (isNull())
-		new (this)Value(objectValue);
+		new (this)Value(OBJECT_T);
 	return data_.o->operator[](index);
 }
 Value& Value::operator[](size_t index) {
-	assert(isArray() || isNull());
+	JSON_ASSERT(isArray() || isNull());
 	if (isNull())
-		new (this)Value(arrayValue);
+		new (this)Value(ARRAY_T);
 	return data_.a->operator[](index);
 }
 void Value::insert(const String& index, Value&& value) {
-	assert(isObject() || isNull());
+	JSON_ASSERT(isObject() || isNull());
 	if (isNull())
-		new (this)Value(objectValue);
+		new (this)Value(OBJECT_T);
 	data_.o->emplace(index, value);
 }
-bool Value::asBool()const { assert(isBool()); return data_.b; }
-Int Value::asInt()const { assert(isNumber()); return data_.i; }
-UInt Value::asUInt()const { assert(isNumber()); return data_.u; }
-Int64 Value::asInt64()const { assert(isNumber()); return data_.i64; }
-UInt64 Value::asUInt64()const { assert(isNumber()); return data_.u64; }
-Float Value::asFloat()const { assert(isNumber()); return data_.f; }
-Double Value::asDouble()const { assert(isNumber()); return data_.d; }
-String Value::asString()const { assert(isString());	return *data_.s; }
-Array Value::asArray()const { assert(isArray()); return *data_.a; }
-Object Value::asObject()const { assert(isObject()); return *data_.o; }
-bool Value::isNull()const { return type_ == nullValue; }
-bool Value::isBool()const { return type_ == booleanValue; }
-bool Value::isNumber()const { return type_ == intValue || type_ == uintValue || type_ == realValue; }
-bool Value::isString()const { return type_ == stringValue; }
-bool Value::isArray()const { return type_ == arrayValue; }
-bool Value::isObject()const { return type_ == objectValue; }
+bool Value::asBool()const { JSON_ASSERT(isBool()); return data_.b; }
+Int Value::asInt()const { JSON_ASSERT(isNumber()); return data_.i; }
+UInt Value::asUInt()const { JSON_ASSERT(isNumber()); return data_.u; }
+Int64 Value::asInt64()const { JSON_ASSERT(isNumber()); return data_.i64; }
+UInt64 Value::asUInt64()const { JSON_ASSERT(isNumber()); return data_.u64; }
+Float Value::asFloat()const { JSON_ASSERT(isNumber()); return data_.f; }
+Double Value::asDouble()const { JSON_ASSERT(isNumber()); return data_.d; }
+String Value::asString()const { JSON_ASSERT(isString());	return *data_.s; }
+Array Value::asArray()const { JSON_ASSERT(isArray()); return *data_.a; }
+Object Value::asObject()const { JSON_ASSERT(isObject()); return *data_.o; }
+bool Value::isNull()const { return type_ == NULL_T; }
+bool Value::isBool()const { return type_ == BOOL_T; }
+bool Value::isNumber()const { return type_ == INT_T || type_ == UINT_T || type_ == REAL_T; }
+bool Value::isString()const { return type_ == STRING_T; }
+bool Value::isArray()const { return type_ == ARRAY_T; }
+bool Value::isObject()const { return type_ == OBJECT_T; }
 ValueType Value::getType()const { return type_; }
 void Value::swap(Value& other) {
 	std::swap(data_, other.data_);
@@ -500,28 +589,28 @@ void Value::append(const Value& value) {
 	append(Value(value));
 }
 void Value::append(Value&& value) {
-	assert(isArray() || isNull());
+	JSON_ASSERT(isArray() || isNull());
 	if (isNull())
-		new (this)Value(arrayValue);
+		new (this)Value(ARRAY_T);
 	data_.a->push_back(move(value));
 }
 size_t Value::size()const {
 	switch (type_) {
-	case nullValue:
+	case NULL_T:
 		return 0;
-	case intValue:
+	case INT_T:
 		break;
-	case uintValue:
+	case UINT_T:
 		break;
-	case realValue:
+	case REAL_T:
 		break;
-	case stringValue:
+	case STRING_T:
 		return data_.s->size();
-	case booleanValue:
+	case BOOL_T:
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		return data_.a->size();
-	case objectValue:
+	case OBJECT_T:
 		return data_.o->size();
 	default:
 		break;
@@ -530,21 +619,21 @@ size_t Value::size()const {
 }
 bool Value::empty()const {
 	switch (type_) {
-	case nullValue:
-		return OK;
-	case intValue:
+	case NULL_T:
+		return true;
+	case INT_T:
 		break;
-	case uintValue:
+	case UINT_T:
 		break;
-	case realValue:
+	case REAL_T:
 		break;
-	case stringValue:
+	case STRING_T:
 		return data_.s->empty();
-	case booleanValue:
+	case BOOL_T:
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		return data_.a->empty();
-	case objectValue:
+	case OBJECT_T:
 		return data_.o->empty();
 	default:
 		break;
@@ -558,29 +647,29 @@ bool Value::has(const String& key)const {
 }
 void Value::clear() {
 	switch (type_) {
-	case nullValue:
+	case NULL_T:
 		break;
-	case intValue:
+	case INT_T:
 		break;
-	case uintValue:
+	case UINT_T:
 		break;
-	case realValue:
+	case REAL_T:
 		break;
-	case stringValue:
+	case STRING_T:
 		data_.s->clear();
 		break;
-	case booleanValue:
+	case BOOL_T:
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		data_.a->clear();
 		break;
-	case objectValue:
+	case OBJECT_T:
 		data_.o->clear();
 		break;
 	default:
 		break;
 	}
-	type_ = nullValue;
+	type_ = NULL_T;
 }
 String Value::toShortString()const {
 	String out;
@@ -594,177 +683,36 @@ String Value::toStyledString()const {
 	_toString(out, indent, true);
 	return out;
 }
-ErrorCode Value::parse(const char* str) {
-	const char* cur = str;
-	JSON_SKIP;
-	ErrorCode err = _parseValue(cur);
-	if (err != OK) {
-		size_t line = 1;
-		for (const char* i = str; i != cur; ++i) {
-			if (*i == '\n')++line;
-		}
-		std::cerr << err << " in line " << line << std::endl;
-	}
-	return err;
-}
-ErrorCode Value::parse(const String& str) {
-	return parse(str.c_str());
-}
-ErrorCode Value::_parseValue(const char*& cur) {
-	switch (*cur) {
-	case '\0':
-		abort();
-		break;
-	case 'n': {
-		if (cur[1] == 'u' && cur[2] == 'l' && cur[3] == 'l')
-			return cur += 4, OK;
-		else
-			return MISSING_NULL;
-	}
-	case 't': {
-		if (cur[1] == 'r' && cur[2] == 'u' && cur[3] == 'e')
-			return *this = true, cur += 4, OK;
-		else
-			return MISSING_TRUE;
-	}
-	case 'f': {
-		if (cur[1] == 'a' && cur[2] == 'l' && cur[3] == 's' && cur[4] == 'e')
-			return *this = false, cur += 5, OK;
-		else
-			return MISSING_FALSE;
-	}
-	case '[': {
-		++cur;
-		JSON_SKIP;
-		*this = arrayValue;
-		if (*cur == ']') {
-			++cur;
-			return OK;
-		}
-		for (;;) {
-			data_.a->push_back({});
-			JSON_SKIP;
-			JSON_CHECK(data_.a->back()._parseValue(cur));
-			JSON_SKIP;
-			if (*cur == ',')
-				++cur;
-			else if (*cur == ']') {
-				++cur; return OK;
-			}
-			else
-				return MISSING_COMMAS_OR_BRACKETS;
-		}
-	}
-	case '{': {
-		++cur;
-		JSON_SKIP;
-		*this = objectValue;
-		if (*cur == '}') {
-			++cur;
-			return OK;
-		}
-		for (;;) {
-			String key;
-			JSON_SKIP;
-			if (*cur != '"') {
-				return MISSING_QUOTE;
-			}
-			JSON_CHECK(parseString(cur, key));
-			JSON_SKIP;
-			if (*cur != ':') {
-				return MISSING_COLON;
-			}
-			++cur;
-			JSON_SKIP;
-			JSON_CHECK(data_.o->operator[](key)._parseValue(cur));
-			JSON_SKIP;
-			if (*cur == ',')
-				++cur;
-			else if (*cur == '}') {
-				++cur; return OK;
-			}
-			else
-				return MISSING_COMMAS_OR_BRACES;
-		}
-	}
-	case '"': {
-		*this = stringValue;
-		JSON_CHECK(parseString(cur, *data_.s));
-		return OK;
-	}
-	case '0':
-	case '1':
-	case '2':
-	case '3':
-	case '4':
-	case '5':
-	case '6':
-	case '7':
-	case '8':
-	case '9':
-	case '-': {
-		const char* p = cur;
-		char c = '0'; // stopgap for already consumed character
-		// integral part
-		while (c >= '0' && c <= '9')
-			c = *++p;
-		// fractional part
-		if (c == '.') {
-			c = *++p;
-			while (c >= '0' && c <= '9')
-				c = *++p;
-		}
-		// exponential part
-		if (c == 'e' || c == 'E') {
-			c = *++p;
-			if (c == '+' || c == '-')
-				c = *++p;
-			while (c >= '0' && c <= '9')
-				c = *++p;
-		}
-		// check out of range
-		if (!c)
-			return UNEXPECTED_ENDING_CHARACTER;
-		double num = 0.0;
-		std::from_chars(cur, p, num);
-		cur = p;
-		*this = num;
-		return OK;
-	}
-	default:
-		return INVALID_CHARACTER;
-	}
-}
 void Value::_toString(String& out, UInt& indent, bool styled)const {
 	switch (type_) {
-	case nullValue:
+	case NULL_T:
 		out.append("null", 4);
 		break;
-	case intValue: {
+	case INT_T: {
 		char buffer[21]{ 0 };
 		std::to_chars(buffer, buffer + sizeof buffer, data_.i64);
 		out.append(buffer);
 		break;
 	}
-	case uintValue: {
+	case UINT_T: {
 		char buffer[21]{ 0 };
 		std::to_chars(buffer, buffer + sizeof buffer, data_.u64);
 		out.append(buffer);
 		break;
 	}
-	case realValue: {
+	case REAL_T: {
 		char buffer[21]{ 0 };
 		std::to_chars(buffer, buffer + sizeof buffer, data_.d);
 		out.append(buffer);
 		break;
 	}
-	case stringValue:
+	case STRING_T:
 		writeString(out, *data_.s);
 		break;
-	case booleanValue:
+	case BOOL_T:
 		asBool() ? out.append("true", 4) : out.append("false", 5);
 		break;
-	case arrayValue:
+	case ARRAY_T:
 		if (styled) {
 			out += '[';
 			if (!empty()) {
@@ -796,7 +744,7 @@ void Value::_toString(String& out, UInt& indent, bool styled)const {
 			out += ']';
 		}
 		break;
-	case objectValue:
+	case OBJECT_T:
 		if (styled) {
 			out += '{';
 			if (!empty()) {
@@ -840,8 +788,5 @@ void Value::_toString(String& out, UInt& indent, bool styled)const {
 }
 std::ostream& operator<<(std::ostream& os, const Value& value) {
 	return os << value.toStyledString();
-}
-std::ostream& operator<<(std::ostream& os, ErrorCode err) {
-	return os << ErrorToString(err);
 }
 } // namespace Json

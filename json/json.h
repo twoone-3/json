@@ -1,13 +1,29 @@
-﻿// Json.h made by twoone3
-// Github: https://github.com/twoone-3/Json
+﻿/*
+Author:
+	twoone3
+Last change:
+	2021.7.11
+Github:
+	https://github.com/twoone-3/Json
+Reference:
+	https://github.com/jo-qzy/MyJson/
+	https://github.com/open-source-parsers/jsoncpp
+Readme:
+	This library can quickly parse or generate JSON.
+	We use Dom to store JSON data, Value is the only class, and all interfaces are in the Value class.
+
+*/
 #pragma once
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
-#include <cassert>
-#include <charconv>
 #include <map>
+#include <charconv>
 
+#if !_HAS_CXX17
+#error json.h require c++17 <charconv> <string_view>
+#endif
 namespace json {
 
 class Value;
@@ -26,33 +42,51 @@ using Object = std::map<String, Value>;
 
 //Type of the value held by a Value object.
 enum ValueType :uint8_t {
-	nullValue,		//'null' value
-	intValue,		//signed integer value
-	uintValue,		//unsigned integer value
-	realValue,		//double value
-	stringValue,	//UTF-8 string value
-	booleanValue,	//bool value
-	arrayValue,		//array value (ordered list)
-	objectValue		//object value (collection of name/value pairs).
-};
-//To express JSON syntax error
-enum ErrorCode :uint8_t {
-	OK,
-	INVALID_CHARACTER,
-	INVALID_ESCAPE,
-	MISSING_QUOTE,
-	MISSING_NULL,
-	MISSING_TRUE,
-	MISSING_FALSE,
-	MISSING_COMMAS_OR_BRACKETS,
-	MISSING_COMMAS_OR_BRACES,
-	MISSING_COLON,
-	MISSING_SURROGATE_PAIR,
-	UNEXPECTED_ENDING_CHARACTER,
+	NULL_T,		//'null' value
+	INT_T,		//signed integer value
+	UINT_T,		//unsigned integer value
+	REAL_T,		//double value
+	STRING_T,	//UTF-8 string value
+	BOOL_T,	//bool value
+	ARRAY_T,		//array value (ordered list)
+	OBJECT_T		//object value (collection of name/value pairs).
 };
 //A Value object can be one of the ValueTyoe
 class Value {
 public:
+	union ValueData {
+		bool b;
+		Int i;
+		UInt u;
+		Int64 i64;
+		UInt64 u64;
+		Float f;
+		Double d;
+		String* s;
+		Array* a;
+		Object* o;
+	};
+	class Parser {
+	public:
+		bool parse(const String&, Value&);
+		String getError();
+	private:
+		bool parseValue(Value&);
+		bool parseNull(Value&);
+		bool parseTrue(Value&);
+		bool parseFalse(Value&);
+		bool parseString(Value&);
+		bool parseString(String&);
+		bool parseHex4(UInt&);
+		bool parseArray(Value&);
+		bool parseObject(Value&);
+		bool parseNumber(Value&);
+		bool error(const char*);
+		const char* cur_ = nullptr;
+		const char* begin_ = nullptr;
+		const char* end_ = nullptr;
+		const char* err_ = "unknown";
+	};
 	Value();
 	Value(nullptr_t);
 	Value(bool);
@@ -113,30 +147,12 @@ public:
 	String toShortString()const;
 	//转换成格式化的字符串
 	String toStyledString()const;
-	//转换字符串为JSON
-	ErrorCode parse(const char*);
-	//转换字符串为JSON
-	ErrorCode parse(const String&);
 private:
-	ErrorCode _parseValue(const char*&);
 	void _toString(String&, UInt&, bool)const;
-	union ValueData {
-		bool b;
-		Int i;
-		UInt u;
-		Int64 i64;
-		UInt64 u64;
-		Float f;
-		Double d;
-		String* s;
-		Array* a;
-		Object* o;
-	} data_;
+	ValueData data_;
 	ValueType type_;
 };
 //io support
 std::ostream& operator<<(std::ostream&, const Value&);
-//io support
-std::ostream& operator<<(std::ostream&, ErrorCode);
 
 }// namespace Json
