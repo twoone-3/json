@@ -186,7 +186,7 @@ bool Value::Parser::parseString(String& s) {
 		// "xxxx"
 		// ^
 		c = *++cur_;
-		if (!c)
+		if (c == '\0')
 			return error("missing '\"'");
 		else if (c == '"') {
 			++cur_;
@@ -255,22 +255,21 @@ bool Value::Parser::parseArray(Value& value) {
 	++cur_;
 	JSON_SKIP;
 	value = ARRAY_T;
-	if (*cur_ == ']') {
-		++cur_;
-		return true;
-	}
+	//empty array
+	if (*cur_ == ']')
+		return ++cur_, true;
 	for (;;) {
-		value.data_.a->push_back({});
+		value.data_.a->push_back(nullptr);
 		JSON_SKIP;
 		JSON_CHECK(parseValue(value.data_.a->back()));
 		JSON_SKIP;
-		if (*cur_ == ',')
+		char ch = *cur_;
+		if (ch == ',')
 			++cur_;
-		else if (*cur_ == ']') {
-			++cur_; return true;
-		}
+		else if (ch == ']')
+			return ++cur_, true;
 		else
-			return error("misng ',' or ']'");
+			return error("missing ',' or ']'");
 	}
 	return false;
 }
@@ -278,32 +277,29 @@ bool Value::Parser::parseObject(Value& value) {
 	++cur_;
 	JSON_SKIP;
 	value = OBJECT_T;
-	if (*cur_ == '}') {
-		++cur_;
-		return true;
-	}
+	//empty object
+	if (*cur_ == '}')
+		return ++cur_, true;
 	for (;;) {
 		String key;
 		JSON_SKIP;
-		if (*cur_ != '"') {
+		if (*cur_ != '"')
 			return error("missing '\"'");
-		}
 		JSON_CHECK(parseString(key));
 		JSON_SKIP;
-		if (*cur_ != ':') {
+		if (*cur_ != ':')
 			return error("missing ':'");
-		}
 		++cur_;
 		JSON_SKIP;
 		JSON_CHECK(parseValue(value.data_.o->operator[](key)));
 		JSON_SKIP;
-		if (*cur_ == ',')
+		char ch = *cur_;
+		if (ch == ',')
 			++cur_;
-		else if (*cur_ == '}') {
-			++cur_; return true;
-		}
+		else if (ch == '}')
+			return ++cur_, true;
 		else
-			return error("misng ',' or '}'");
+			return error("missing ',' or '}'");
 	}
 	return false;
 }
@@ -421,12 +417,14 @@ void Value::Writer::writeString(const Value& value) {
 				break;
 			default:
 #if JSON_UTF8
-				if (uint8_t(c) < 0x20)
-					out_.append("\\u").append(writeHex16Bit(c));
+				if (uint8_t(c) < 0x20) {
+					out_ += "\\u";
+					writeHex16Bit(out_, c);
+				}
 				else
-					out_ += c);
+					out_ += c;
 #else
-				codepoint = UTF8ToCodepoint(&c, &*str.end()); // modifies `c`
+				codepoint = UTF8ToCodepoint(&c, &str.back()); // modifies `c`
 				if (codepoint < 0x20) {
 					out_ += "\\u";
 					writeHex16Bit(out_, codepoint);
@@ -440,6 +438,7 @@ void Value::Writer::writeString(const Value& value) {
 					writeHex16Bit(out_, codepoint);
 				}
 				else {
+					puts("ssssssssss___");
 					// Extended Unicode. Encode 20 bits as a surrogate pair.
 					codepoint -= 0x10000;
 					out_ += "\\u";
@@ -802,5 +801,12 @@ Value::operator String()const {
 }
 std::ostream& operator<<(std::ostream& os, const Value& value) {
 	return os << value.toStyledString();
+}
+Value Parse(const String& s) {
+	Value value;
+	Value::Parser parser;
+	if (!parser.parse(s, value))
+		std::cerr << parser.getError() << std::endl;
+	return value;
 }
 } // namespace Json

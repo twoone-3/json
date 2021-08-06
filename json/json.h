@@ -2,9 +2,9 @@
 Author:
 	twoone3
 Last change:
-	2021.7.11
+	2021.8.6
 Github:
-	https://github.com/twoone-3/Json
+	https://github.com/twoone-3/json
 Reference:
 	https://github.com/jo-qzy/MyJson/
 	https://github.com/open-source-parsers/jsoncpp
@@ -181,5 +181,6 @@ private:
 };
 //io support
 std::ostream& operator<<(std::ostream&, const Value&);
-
+//parse string
+Value Parse(const String&);
 }// namespace Json

@@ -12,7 +12,7 @@ constexpr auto testjson = R"(
 		"key":"value\n"
 	},
 	"edf":2.0,
-	"edef":58273637338730.58749240958157003243567,
+	"edef":"啊这",
 	"wes":5058e100
 }
 )";
@@ -25,22 +25,18 @@ int main() {
 	start = clock();
 	//…calculating…
 	for (auto& x : directory_iterator("test")) {
-		cout << x << endl;
+		cout << "测试文件：" << x << endl;
 		ifstream f(x);
 		string s(istreambuf_iterator<char>(f), {});
-		Value value;
-		Value::Parser p;
-		if (!p.parse(s, value))
-			cerr << p.getError() << endl;
-		cout << value << endl;
+		cout << "原文件：\n" << s << endl;
+		Value value(Parse(s));
+		cout << "解析JSON后：\n" << value << endl;
 	}
 
 	for (unsigned i = 0; i != 1; ++i) {
-		Value value;
-		Value::Parser p;
-		if (!p.parse(testjson, value))
-			cerr << p.getError() << endl;
+		Value value(Parse(testjson));
 		cout << value << endl;
+		cout << Parse(value) << endl;
 	}
 	end = clock();
 	printf("执行耗时%lfs\n", static_cast<double>(end - start) / CLK_TCK);
