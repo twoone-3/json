@@ -36,7 +36,7 @@ static bool hasEsecapingChar(const String& str) {
 	}
 	return false;
 }
-static UInt UTF8ToCodepoint(const char* s, const char* e) {
+static UInt UTF8ToCodepoint(const char*& s, const char* e) {
 	const UInt REPLACEMENT_CHARACTER = 0xFFFD;
 
 	UInt firstByte = static_cast<unsigned char>(*s);
@@ -87,7 +87,7 @@ static UInt UTF8ToCodepoint(const char* s, const char* e) {
 	return REPLACEMENT_CHARACTER;
 }
 static void writeHex16Bit(String& s, UInt u) {
-	constexpr const char hex2[] =
+	constexpr const char hex2[513] =
 		"000102030405060708090a0b0c0d0e0f"
 		"101112131415161718191a1b1c1d1e1f"
 		"202122232425262728292a2b2c2d2e2f"
@@ -119,13 +119,12 @@ bool Value::Parser::parse(const char* str, size_t len, Value& value) {
 	cur_ = str;
 	begin_ = str;
 	end_ = str + len;
-	//Skip whitespace
+	//skip bom
+	if (cur_[0] == 0xEF && cur_[1] == 0xBB && cur_[2] == 0xBF)
+		cur_ += 3;
+	//skip whitespace
 	JSON_SKIP; JSON_CHECK_END;
-	bool res = parseValue(value);
-	JSON_SKIP;
-	if (cur_ != end_)
-		return error("Extra characters");
-	return res;
+	return parseValue(value);
 }
 String Value::Parser::getError() {
 	String e;
@@ -177,7 +176,7 @@ bool Value::Parser::parseFalse(Value& value) {
 	return false;
 }
 bool Value::Parser::parseString(Value& value) {
-	value = STRING_T;
+	value = kString;
 	return parseString(*value.data_.s);
 }
 bool Value::Parser::parseString(String& s) {
@@ -254,7 +253,7 @@ bool Value::Parser::parseHex4(UInt& u) {
 bool Value::Parser::parseArray(Value& value) {
 	++cur_;
 	JSON_SKIP;
-	value = ARRAY_T;
+	value = kArray;
 	//empty array
 	if (*cur_ == ']')
 		return ++cur_, true;
@@ -276,7 +275,7 @@ bool Value::Parser::parseArray(Value& value) {
 bool Value::Parser::parseObject(Value& value) {
 	++cur_;
 	JSON_SKIP;
-	value = OBJECT_T;
+	value = kObject;
 	//empty object
 	if (*cur_ == '}')
 		return ++cur_, true;
@@ -303,7 +302,9 @@ bool Value::Parser::parseObject(Value& value) {
 	}
 	return false;
 }
+//有问题！
 bool Value::Parser::parseNumber(Value& value) {
+	double num;
 	const char* p = cur_;
 	// stopgap for already consumed character
 	char c = *p;
@@ -329,8 +330,9 @@ bool Value::Parser::parseNumber(Value& value) {
 	}
 	// check out of range
 	if (c == '\0')
-		return error("unexpected_ending_character");
-	double num;
+		return error("unexpected ending character");
+	if (p == cur_)
+		return error("missing character");
 	std::from_chars(cur_, p, num);
 	cur_ = p;
 	value = num;
@@ -343,14 +345,14 @@ bool Value::Parser::error(const char* err) {
 
 void Value::Writer::write(const Value& value, bool styled) {
 	switch (value.type_) {
-	case NULL_T:return writeNull();
-	case INT_T:return writeInt(value);
-	case UINT_T:return writeUInt(value);
-	case REAL_T:return writeDouble(value);
-	case STRING_T:return writeString(value);
-	case BOOL_T:return writeBool(value);
-	case ARRAY_T:return styled ? writePrettyArray(value) : writeArray(value);
-	case OBJECT_T:return styled ? writePrettyObject(value) : writeObject(value);
+	case kNull:return writeNull();
+	case kBoolean:return writeBool(value);
+	case kInteger:return writeInt(value);
+	case kUInteger:return writeUInt(value);
+	case kReal:return writeDouble(value);
+	case kString:return writeString(value);
+	case kArray:return styled ? writePrettyArray(value) : writeArray(value);
+	case kObject:return styled ? writePrettyObject(value) : writeObject(value);
 	}
 }
 String Value::Writer::getOutput() {
@@ -382,11 +384,11 @@ void Value::Writer::writeDouble(const Value& value) {
 }
 void Value::Writer::writeString(const Value& value) {
 	const String& str = *value.data_.s;
+	UInt codepoint;
 	out_ += '"';
 	if (hasEsecapingChar(str))
-		for (auto& c : str) {
-			UInt codepoint;
-			switch (c) {
+		for (const char* cur = str.c_str(); cur < str.c_str() + str.length(); ++cur) {
+			switch (*cur) {
 			case '\"':
 				out_ += '\\';
 				out_ += '"';
@@ -424,7 +426,7 @@ void Value::Writer::writeString(const Value& value) {
 				else
 					out_ += c;
 #else
-				codepoint = UTF8ToCodepoint(&c, &str.back()); // modifies `c`
+				codepoint = UTF8ToCodepoint(cur, str.c_str() + str.length()); // modifies `c`
 				if (codepoint < 0x20) {
 					out_ += "\\u";
 					writeHex16Bit(out_, codepoint);
@@ -438,7 +440,6 @@ void Value::Writer::writeString(const Value& value) {
 					writeHex16Bit(out_, codepoint);
 				}
 				else {
-					puts("ssssssssss___");
 					// Extended Unicode. Encode 20 bits as a surrogate pair.
 					codepoint -= 0x10000;
 					out_ += "\\u";
@@ -450,12 +451,12 @@ void Value::Writer::writeString(const Value& value) {
 			}
 		}
 	else
-		out_.append(str);
+		out_ += str;
 	out_ += '"';
 }
 void Value::Writer::writeArray(const Value& value) {
 	out_ += '[';
-	if (!value.empty()) {
+	if (!value.data_.a->empty()) {
 		for (auto& x : *value.data_.a) {
 			write(x, false);
 			out_ += ',';
@@ -467,7 +468,7 @@ void Value::Writer::writeArray(const Value& value) {
 }
 void Value::Writer::writeObject(const Value& value) {
 	out_ += '{';
-	if (!value.empty()) {
+	if (!value.data_.o->empty()) {
 		for (auto& x : *value.data_.o) {
 			writeString(x.first);
 			out_ += ':';
@@ -480,7 +481,7 @@ void Value::Writer::writeObject(const Value& value) {
 }
 void Value::Writer::writePrettyArray(const Value& value) {
 	out_ += '[';
-	if (!value.empty()) {
+	if (!value.data_.a->empty()) {
 		out_ += '\n';
 		++indent_;
 		for (auto& x : *value.data_.a) {
@@ -499,7 +500,7 @@ void Value::Writer::writePrettyArray(const Value& value) {
 }
 void Value::Writer::writePrettyObject(const Value& value) {
 	out_ += '{';
-	if (!value.empty()) {
+	if (!value.data_.o->empty()) {
 		out_ += '\n';
 		++indent_;
 		for (auto& x : *value.data_.o) {
@@ -520,105 +521,104 @@ void Value::Writer::writePrettyObject(const Value& value) {
 	out_ += '}';
 }
 
-Value::Value() : type_(NULL_T) { data_.u64 = 0; }
-Value::Value(nullptr_t) : type_(NULL_T) { data_.u64 = 0; }
-Value::Value(bool b) : type_(BOOL_T) { data_.u64 = b; }
-Value::Value(Int num) : type_(INT_T) { data_.i64 = num; }
-Value::Value(UInt num) : type_(UINT_T) { data_.u64 = num; }
-Value::Value(Int64 num) : type_(INT_T) { data_.i64 = num; }
-Value::Value(UInt64 num) : type_(UINT_T) { data_.u64 = num; }
-Value::Value(Float num) : type_(REAL_T) { data_.d = num; }
-Value::Value(Double num) : type_(REAL_T) { data_.d = num; }
-Value::Value(const char* s) : type_(STRING_T) { data_.s = new String(s); }
-Value::Value(const String& s) : type_(STRING_T) { data_.s = new String(s); }
-Value::Value(ValueType type) : type_(type) {
-	data_.u64 = 0;
-	switch (type_) {
-	case NULL_T:
+Value::ValueData::ValueData() {}
+Value::ValueData::ValueData(bool value) : b(value) {}
+Value::ValueData::ValueData(Int value) : i(value) {}
+Value::ValueData::ValueData(UInt value) : u(value) {}
+Value::ValueData::ValueData(Int64 value) : i64(value) {}
+Value::ValueData::ValueData(UInt64 value) : u64(value) {}
+Value::ValueData::ValueData(Float value) : f(value) {}
+Value::ValueData::ValueData(Double value) : d(value) {}
+Value::ValueData::ValueData(const char* value) : s(new String(value)) {}
+Value::ValueData::ValueData(const String& value) : s(new String(value)) {}
+Value::ValueData::ValueData(String&& value) : s(new String(move(value))) {}
+Value::ValueData::ValueData(ValueType type) {
+	switch (type) {
+	case json::kString:
+		s = new String;
 		break;
-	case INT_T:
+	case json::kArray:
+		a = new Array;
 		break;
-	case UINT_T:
+	case json::kObject:
+		o = new Object;
 		break;
-	case REAL_T:
+	}
+}
+Value::ValueData::ValueData(const ValueData& other, ValueType type) {
+	switch (type) {
+	case kNull:
 		break;
-	case STRING_T:
-		data_.s = new String;
+	case kBoolean:
+		b = other.b;
 		break;
-	case BOOL_T:
+	case kInteger:
+		i64 = other.i64;
 		break;
-	case ARRAY_T:
-		data_.a = new Array;
+	case kUInteger:
+		u64 = other.u64;
 		break;
-	case OBJECT_T:
-		data_.o = new Object;
+	case kReal:
+		d = other.d;
+		break;
+	case kString:
+		s = new String(*other.s);
+		break;
+	case kArray:
+		a = new Array(*other.a);
+		break;
+	case kObject:
+		o = new Object(*other.o);
 		break;
 	default:
 		break;
 	}
-};
-Value::Value(const Value& other) {
-	data_.u64 = 0;
-	type_ = other.type_;
-	switch (other.type_) {
-	case NULL_T:
+
+}
+Value::ValueData::ValueData(ValueData&& other) {
+	u64 = other.u64;
+}
+void Value::ValueData::assign(const ValueData& other, ValueType type) {
+	operator=(ValueData(other, type));
+}
+void Value::ValueData::operator=(ValueData&& other) {
+	u64 = other.u64;
+}
+void Value::ValueData::destroy(ValueType type) {
+	switch (type) {
+	case json::kString:
+		delete s;
 		break;
-	case INT_T:
-		data_.i64 = other.data_.i64;
+	case json::kArray:
+		delete a;
 		break;
-	case UINT_T:
-		data_.u64 = other.data_.u64;
-		break;
-	case REAL_T:
-		data_.d = other.data_.d;
-		break;
-	case STRING_T:
-		data_.s = new String(*other.data_.s);
-		break;
-	case BOOL_T:
-		data_.b = other.data_.b;
-		break;
-	case ARRAY_T:
-		data_.a = new Array(*other.data_.a);
-		break;
-	case OBJECT_T:
-		data_.o = new Object(*other.data_.o);
-		break;
-	default:
+	case json::kObject:
+		delete o;
 		break;
 	}
-};
-Value::Value(Value&& other)noexcept {
-	data_ = other.data_;
-	type_ = other.type_;
-	other.type_ = NULL_T;
+}
+
+Value::Value() : data_(), type_(kNull) {}
+Value::Value(nullptr_t) : data_(), type_(kNull) {}
+Value::Value(bool value) : data_(value), type_(kBoolean) {}
+Value::Value(Int value) : data_(value), type_(kInteger) {}
+Value::Value(UInt value) : data_(value), type_(kUInteger) {}
+Value::Value(Int64 value) : data_(value), type_(kInteger) {}
+Value::Value(UInt64 value) : data_(value), type_(kUInteger) {}
+Value::Value(Float value) : data_(value), type_(kReal) {}
+Value::Value(Double value) : data_(value), type_(kReal) {}
+Value::Value(const char* value) : data_(value), type_(kString) {}
+Value::Value(const String& value) : data_(value), type_(kString) {}
+Value::Value(String&& value) : data_(move(value)), type_(kString) {}
+Value::Value(ValueType type) : data_(type), type_(type) {};
+Value::Value(const Value& other) :data_(other.data_, other.type_), type_(other.type_) {};
+Value::Value(Value&& other)noexcept :data_(move(other.data_)), type_(other.type_) {
+	other.type_ = kNull;
 	other.data_.u64 = 0;
 };
 Value::~Value() {
-	switch (type_) {
-	case NULL_T:
-		break;
-	case INT_T:
-		break;
-	case UINT_T:
-		break;
-	case REAL_T:
-		break;
-	case STRING_T:
-		delete data_.s;
-		break;
-	case BOOL_T:
-		break;
-	case ARRAY_T:
-		delete data_.a;
-		break;
-	case OBJECT_T:
-		delete data_.o;
-		break;
-	default:
-		break;
-	}
-	type_ = NULL_T;
+	data_.destroy(type_);
+	type_ = kNull;
 }
 Value& Value::operator=(const Value& other) {
 	return operator=(Value(other));
@@ -631,21 +631,21 @@ bool Value::equal(const Value& other)const {
 	if (type_ != other.type_)
 		return false;
 	switch (type_) {
-	case NULL_T:
+	case kNull:
 		return true;
-	case INT_T:
-		return data_.i64 == other.data_.i64;
-	case UINT_T:
-		return data_.u64 == other.data_.u64;
-	case REAL_T:
-		return data_.d == other.data_.d;
-	case STRING_T:
-		return *data_.s == *other.data_.s;
-	case BOOL_T:
+	case kBoolean:
 		return data_.b == other.data_.b;
-	case ARRAY_T:
+	case kInteger:
+		return data_.i64 == other.data_.i64;
+	case kUInteger:
+		return data_.u64 == other.data_.u64;
+	case kReal:
+		return data_.d == other.data_.d;
+	case kString:
+		return *data_.s == *other.data_.s;
+	case kArray:
 		return *data_.a == *other.data_.a;
-	case OBJECT_T:
+	case kObject:
 		return *data_.o == *other.data_.o;
 	default:
 		break;
@@ -658,19 +658,27 @@ bool Value::operator==(const Value& other)const {
 Value& Value::operator[](const String& index) {
 	JSON_ASSERT(isObject() || isNull());
 	if (isNull())
-		new (this)Value(OBJECT_T);
+		new (this)Value(kObject);
 	return data_.o->operator[](index);
 }
 Value& Value::operator[](size_t index) {
 	JSON_ASSERT(isArray() || isNull());
 	if (isNull())
-		new (this)Value(ARRAY_T);
-	return data_.a->operator[](index);
+		new (this)Value(kArray);
+	auto begin = data_.a->begin();
+	while (begin != data_.a->end()) {
+		--index;
+		if (!index) {
+			return *begin;
+		}
+		++begin;
+	}
+	//return data_.a->operator[](index);
 }
 void Value::insert(const String& index, Value&& value) {
 	JSON_ASSERT(isObject() || isNull());
 	if (isNull())
-		new (this)Value(OBJECT_T);
+		new (this)Value(kObject);
 	data_.o->emplace(index, value);
 }
 bool Value::asBool()const { JSON_ASSERT(isBool()); return data_.b; }
@@ -683,12 +691,12 @@ Double Value::asDouble()const { JSON_ASSERT(isNumber()); return data_.d; }
 String Value::asString()const { JSON_ASSERT(isString());	return *data_.s; }
 Array Value::asArray()const { JSON_ASSERT(isArray()); return *data_.a; }
 Object Value::asObject()const { JSON_ASSERT(isObject()); return *data_.o; }
-bool Value::isNull()const { return type_ == NULL_T; }
-bool Value::isBool()const { return type_ == BOOL_T; }
-bool Value::isNumber()const { return type_ == INT_T || type_ == UINT_T || type_ == REAL_T; }
-bool Value::isString()const { return type_ == STRING_T; }
-bool Value::isArray()const { return type_ == ARRAY_T; }
-bool Value::isObject()const { return type_ == OBJECT_T; }
+bool Value::isNull()const { return type_ == kNull; }
+bool Value::isBool()const { return type_ == kBoolean; }
+bool Value::isNumber()const { return type_ == kInteger || type_ == kUInteger || type_ == kReal; }
+bool Value::isString()const { return type_ == kString; }
+bool Value::isArray()const { return type_ == kArray; }
+bool Value::isObject()const { return type_ == kObject; }
 ValueType Value::getType()const { return type_; }
 void Value::swap(Value& other) {
 	std::swap(data_, other.data_);
@@ -696,7 +704,15 @@ void Value::swap(Value& other) {
 }
 bool Value::remove(const String& index) {
 	if (isObject()) {
-		return data_.o->erase(index);
+		data_.o->erase(index);
+		return true;
+	}
+	return false;
+}
+bool Value::remove(size_t index) {
+	if (isArray() && index < size()) {
+		data_.a->erase(data_.a->begin() + index);
+		return true;
 	}
 	return false;
 }
@@ -706,26 +722,26 @@ void Value::append(const Value& value) {
 void Value::append(Value&& value) {
 	JSON_ASSERT(isArray() || isNull());
 	if (isNull())
-		new (this)Value(ARRAY_T);
+		new (this)Value(kArray);
 	data_.a->push_back(move(value));
 }
 size_t Value::size()const {
 	switch (type_) {
-	case NULL_T:
+	case kNull:
 		return 0;
-	case INT_T:
+	case kBoolean:
 		break;
-	case UINT_T:
+	case kInteger:
 		break;
-	case REAL_T:
+	case kUInteger:
 		break;
-	case STRING_T:
+	case kReal:
+		break;
+	case kString:
 		return data_.s->size();
-	case BOOL_T:
-		break;
-	case ARRAY_T:
+	case kArray:
 		return data_.a->size();
-	case OBJECT_T:
+	case kObject:
 		return data_.o->size();
 	default:
 		break;
@@ -734,21 +750,21 @@ size_t Value::size()const {
 }
 bool Value::empty()const {
 	switch (type_) {
-	case NULL_T:
+	case kNull:
 		return true;
-	case INT_T:
+	case kBoolean:
 		break;
-	case UINT_T:
+	case kInteger:
 		break;
-	case REAL_T:
+	case kUInteger:
 		break;
-	case STRING_T:
+	case kReal:
+		break;
+	case kString:
 		return data_.s->empty();
-	case BOOL_T:
-		break;
-	case ARRAY_T:
+	case kArray:
 		return data_.a->empty();
-	case OBJECT_T:
+	case kObject:
 		return data_.o->empty();
 	default:
 		break;
@@ -762,29 +778,29 @@ bool Value::has(const String& key)const {
 }
 void Value::clear() {
 	switch (type_) {
-	case NULL_T:
+	case kNull:
 		break;
-	case INT_T:
+	case kBoolean:
 		break;
-	case UINT_T:
+	case kInteger:
 		break;
-	case REAL_T:
+	case kUInteger:
 		break;
-	case STRING_T:
+	case kReal:
+		break;
+	case kString:
 		data_.s->clear();
 		break;
-	case BOOL_T:
-		break;
-	case ARRAY_T:
+	case kArray:
 		data_.a->clear();
 		break;
-	case OBJECT_T:
+	case kObject:
 		data_.o->clear();
 		break;
 	default:
 		break;
 	}
-	type_ = NULL_T;
+	type_ = kNull;
 }
 String Value::toShortString()const {
 	Writer w;

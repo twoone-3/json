@@ -12,7 +12,7 @@ constexpr auto testjson = R"(
 		"key":"value\n"
 	},
 	"edf":2.0,
-	"edef":"啊这",
+	"edef":"\u3467啊这",
 	"wes":5058e100
 }
 )";
@@ -30,11 +30,13 @@ int main() {
 		string s(istreambuf_iterator<char>(f), {});
 		cout << "原文件：\n" << s << endl;
 		Value value(Parse(s));
-		cout << "解析JSON后：\n" << value << endl;
+		cout << "解析JSON后：\n" << value << "\n\n";
 	}
 
 	for (unsigned i = 0; i != 1; ++i) {
-		Value value(Parse(testjson));
+		Value value = {	
+			Parse(testjson)
+		};
 		cout << value << endl;
 		cout << Parse(value) << endl;
 	}

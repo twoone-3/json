@@ -48,30 +48,25 @@ using Object = std::map<String, Value>;
 
 //Type of the value held by a Value object.
 enum ValueType :uint8_t {
-	NULL_T,		//'null' value
-	INT_T,		//signed integer value
-	UINT_T,		//unsigned integer value
-	REAL_T,		//double value
-	STRING_T,	//UTF-8 string value
-	BOOL_T,	//bool value
-	ARRAY_T,		//array value (ordered list)
-	OBJECT_T		//object value (collection of name/value pairs).
+	kNull,				//'null' value
+	kBoolean,			//bool value
+	kInteger,			//signed integer value
+	kUInteger,	//unsigned integer value
+	kReal,				//double value
+	kString,			//UTF-8 string value
+	kArray,				//array value (ordered list)
+	kObject				//object value (collection of name/value pairs).
 };
 //A Value object can be one of the ValueTyoe
+// example:
+// const char* str = R"({"key":"value"})";
+// Value value(Parse(str));
+// cout << json << endl;
+// json["key"]= 2;
+// cout << json << endl;
+//
 class Value {
 public:
-	union ValueData {
-		bool b;
-		Int i;
-		UInt u;
-		Int64 i64;
-		UInt64 u64;
-		Float f;
-		Double d;
-		String* s;
-		Array* a;
-		Object* o;
-	};
 	class Parser {
 	public:
 		bool parse(const String&, Value&);
@@ -113,6 +108,38 @@ public:
 		String out_;
 		UInt indent_ = 0;
 	};
+	union ValueData {
+		bool b;
+		Int i;
+		UInt u;
+		Int64 i64;
+		UInt64 u64;
+		Float f;
+		Double d;
+		String* s;
+		Array* a;
+		Object* o;
+
+		ValueData();
+		ValueData(bool);
+		ValueData(Int);
+		ValueData(UInt);
+		ValueData(Int64);
+		ValueData(UInt64);
+		ValueData(Float);
+		ValueData(Double);
+		ValueData(const char*);
+		ValueData(const String&);
+		ValueData(String&&);
+		ValueData(ValueType);
+		ValueData(const ValueData&, ValueType);
+		ValueData(ValueData&&);
+		void assign(const ValueData& other, ValueType type);
+		void operator=(ValueData&&);
+		void destroy(ValueType);
+		~ValueData() = default;
+		ValueData& operator=(const ValueData&) = delete;
+	};
 	Value();
 	Value(nullptr_t);
 	Value(bool);
@@ -124,6 +151,7 @@ public:
 	Value(Double);
 	Value(const char*);
 	Value(const String&);
+	Value(String&&);
 	Value(ValueType);
 	Value(const Value&);
 	Value(Value&&)noexcept;
@@ -151,12 +179,12 @@ public:
 	bool isString()const;
 	bool isArray()const;
 	bool isObject()const;
-	//获取类型
 	ValueType getType()const;
-	//交换内容
 	void swap(Value&);
-	//移除对象的指定成员
+	//remove a key-value pair from object
 	bool remove(const String&);
+	//remove a value from array;
+	bool remove(size_t);
 	//向数组追加元素
 	void append(const Value&);
 	//向数组追加元素
