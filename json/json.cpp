@@ -2,10 +2,11 @@
 #include <charconv>
 
 #define JSON_UTF8 0
+#define JSON_ALLOW_COMMENTS 0
 #define JSON_INDENT 4
 
 #define JSON_CHECK(expr) if (!(expr))return false;
-#define JSON_SKIP for (char c = *cur_; (c == ' ' || c == '\t' || c == '\n' || c == '\r') && cur_ != end_;c = *++cur_);
+#define JSON_SKIP JSON_CHECK(skipWhiteSpace())
 #define JSON_CHECK_END if (cur_ == end_)return false;
 #define JSON_ASSERT(expr) if (!(expr))exit(-1);
 
@@ -28,13 +29,6 @@ static void CodePointToUTF8(String& s, UInt u) {
 		s += static_cast<char>(0x80 | (0x3F & (u >> 6)));
 		s += static_cast<char>(0x80 | (0x3F & u));
 	}
-}
-static bool hasEsecapingChar(const String& str) {
-	for (auto& c : str) {
-		if (c == '\\' || c == '"' || c < 0x20 || c > 0x7F)
-			return true;
-	}
-	return false;
 }
 static UInt UTF8ToCodepoint(const char*& s, const char* e) {
 	const UInt REPLACEMENT_CHARACTER = 0xFFFD;
@@ -180,11 +174,10 @@ bool Value::Parser::parseString(Value& value) {
 	return parseString(*value.data_.s);
 }
 bool Value::Parser::parseString(String& s) {
-	char c;
 	for (;;) {
 		// "xxxx"
 		// ^
-		c = *++cur_;
+		char c = *++cur_;
 		if (c == '\0')
 			return error("missing '\"'");
 		else if (c == '"') {
@@ -229,7 +222,6 @@ bool Value::Parser::parseString(String& s) {
 		else
 			s += c;
 	}
-	return false;
 }
 bool Value::Parser::parseHex4(UInt& u) {
 	//u = 0;
@@ -270,7 +262,6 @@ bool Value::Parser::parseArray(Value& value) {
 		else
 			return error("missing ',' or ']'");
 	}
-	return false;
 }
 bool Value::Parser::parseObject(Value& value) {
 	++cur_;
@@ -300,10 +291,10 @@ bool Value::Parser::parseObject(Value& value) {
 		else
 			return error("missing ',' or '}'");
 	}
-	return false;
 }
 //有问题！
 bool Value::Parser::parseNumber(Value& value) {
+	// from https://www.json.org/img/number.png
 	double num;
 	const char* p = cur_;
 	// stopgap for already consumed character
@@ -336,6 +327,48 @@ bool Value::Parser::parseNumber(Value& value) {
 	std::from_chars(cur_, p, num);
 	cur_ = p;
 	value = num;
+	return true;
+}
+bool Value::Parser::skipWhiteSpace() {
+	while (cur_ < end_) {
+		switch (*cur_) {
+		case '\0':return error("unexpected ending character");
+		case '\t':
+		case '\n':
+		case '\r':
+		case ' ':
+			break;
+		case '/':
+#if JSON_ALLOW_COMMENTS
+			++cur_;
+			if (*cur_ == '/') {
+				while (*++cur_ != '\n') {
+					if (cur_ == end_)
+						return error("unexpected ending character");
+				}
+				++cur_;
+				break;
+			}
+			else if (*cur_ == '*') {
+				while (*++cur_ != '*') {
+					if (cur_ == end_)
+						return error("unexpected ending character");
+				}
+				if (*++cur_ == '/') {
+					++cur_;
+					break;
+				}
+
+			}
+			else { return error("invalied comment style"); }
+#else
+			return error("comments are not allowed here");
+#endif
+		default:
+			return true;
+		}
+		++cur_;
+	}
 	return true;
 }
 bool Value::Parser::error(const char* err) {
@@ -383,75 +416,55 @@ void Value::Writer::writeDouble(const Value& value) {
 	out_.append(buffer);
 }
 void Value::Writer::writeString(const Value& value) {
-	const String& str = *value.data_.s;
-	UInt codepoint;
+	const char* cur = value.data_.s->c_str();
+	const char* end = cur + value.data_.s->length();
 	out_ += '"';
-	if (hasEsecapingChar(str))
-		for (const char* cur = str.c_str(); cur < str.c_str() + str.length(); ++cur) {
-			switch (*cur) {
-			case '\"':
-				out_ += '\\';
-				out_ += '"';
-				break;
-			case '\\':
-				out_ += '\\';
-				out_ += '\\';
-				break;
-			case '\b':
-				out_ += '\\';
-				out_ += 'b';
-				break;
-			case '\f':
-				out_ += '\\';
-				out_ += 'f';
-				break;
-			case '\n':
-				out_ += '\\';
-				out_ += 'n';
-				break;
-			case '\r':
-				out_ += '\\';
-				out_ += 'r';
-				break;
-			case '\t':
-				out_ += '\\';
-				out_ += 't';
-				break;
-			default:
+	while (cur < end) {
+		char c = *cur;
+		switch (c) {
+		case '\"':out_ += "\\\""; break;
+		case '\\':out_ += "\\\\"; break;
+		case '\b':out_ += "\\b"; break;
+		case '\f':out_ += "\\f"; break;
+		case '\n':out_ += "\\n"; break;
+		case '\r':out_ += "\\r"; break;
+		case '\t':out_ += "\\t"; break;
+		default: {
 #if JSON_UTF8
-				if (uint8_t(c) < 0x20) {
-					out_ += "\\u";
-					writeHex16Bit(out_, c);
-				}
-				else
-					out_ += c;
-#else
-				codepoint = UTF8ToCodepoint(cur, str.c_str() + str.length()); // modifies `c`
-				if (codepoint < 0x20) {
-					out_ += "\\u";
-					writeHex16Bit(out_, codepoint);
-				}
-				else if (codepoint < 0x80) {
-					out_ += static_cast<char>(codepoint);
-				}
-				else if (codepoint < 0x10000) {
-					// Basic Multilingual Plane
-					out_ += "\\u";
-					writeHex16Bit(out_, codepoint);
-				}
-				else {
-					// Extended Unicode. Encode 20 bits as a surrogate pair.
-					codepoint -= 0x10000;
-					out_ += "\\u";
-					writeHex16Bit(out_, 0xD800 + ((codepoint >> 10) & 0x3FF));
-					writeHex16Bit(out_, 0xDC00 + (codepoint & 0x3FF));
-				}
-#endif
-				break;
+			if (uint8_t(c) < 0x20) {
+				out_ += "\\u";
+				writeHex16Bit(out_, c);
 			}
+			else {
+				out_ += c;
 		}
-	else
-		out_ += str;
+#else
+			UInt codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
+			if (codepoint < 0x20) {
+				out_ += "\\u";
+				writeHex16Bit(out_, codepoint);
+			}
+			else if (codepoint < 0x80) {
+				out_ += static_cast<char>(codepoint);
+			}
+			else if (codepoint < 0x10000) {
+				// Basic Multilingual Plane
+				out_ += "\\u";
+				writeHex16Bit(out_, codepoint);
+			}
+			else {
+				// Extended Unicode. Encode 20 bits as a surrogate pair.
+				codepoint -= 0x10000;
+				out_ += "\\u";
+				writeHex16Bit(out_, 0xD800 + ((codepoint >> 10) & 0x3FF));
+				writeHex16Bit(out_, 0xDC00 + (codepoint & 0x3FF));
+			}
+#endif
+			break;
+	}
+}
+		++cur;
+}
 	out_ += '"';
 }
 void Value::Writer::writeArray(const Value& value) {
@@ -673,7 +686,7 @@ Value& Value::operator[](size_t index) {
 		}
 		++begin;
 	}
-	//return data_.a->operator[](index);
+	return data_.a->operator[](index);
 }
 void Value::insert(const String& index, Value&& value) {
 	JSON_ASSERT(isObject() || isNull());

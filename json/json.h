@@ -2,7 +2,7 @@
 Author:
 	twoone3
 Last change:
-	2021.8.6
+	2021.8.12
 Github:
 	https://github.com/twoone-3/json
 Reference:
@@ -22,7 +22,7 @@ Readme:
 #endif
 
 #if CPP_STANDARD < 201703L
-#error json.h require c++17 <charconv> <string_view>
+#error json.h require c++17 <charconv>
 #endif
 
 #include <iostream>
@@ -48,23 +48,17 @@ using Object = std::map<String, Value>;
 
 //Type of the value held by a Value object.
 enum ValueType :uint8_t {
-	kNull,				//'null' value
-	kBoolean,			//bool value
-	kInteger,			//signed integer value
+	kNull,		//'null' value
+	kBoolean,	//bool value
+	kInteger,	//signed integer value
 	kUInteger,	//unsigned integer value
-	kReal,				//double value
-	kString,			//UTF-8 string value
-	kArray,				//array value (ordered list)
-	kObject				//object value (collection of name/value pairs).
+	kReal,		//double value
+	kString,	//UTF-8 string value
+	kArray,		//array value (ordered list)
+	kObject		//object value (collection of name/value pairs).
 };
 //A Value object can be one of the ValueTyoe
-// example:
-// const char* str = R"({"key":"value"})";
-// Value value(Parse(str));
-// cout << json << endl;
-// json["key"]= 2;
-// cout << json << endl;
-//
+//you can use operator[] to modify the members of a object
 class Value {
 public:
 	class Parser {
@@ -83,6 +77,7 @@ public:
 		bool parseArray(Value&);
 		bool parseObject(Value&);
 		bool parseNumber(Value&);
+		bool skipWhiteSpace();
 		bool error(const char*);
 		const char* cur_ = nullptr;
 		const char* begin_ = nullptr;
