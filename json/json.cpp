@@ -7,7 +7,7 @@
 
 #define JSON_CHECK(expr) if (!(expr))return false;
 #define JSON_SKIP JSON_CHECK(skipWhiteSpace())
-#define JSON_CHECK_END if (cur_ == end_)return false;
+#define JSON_CHECK_END if (cur_ == end_)return error("unexpected ending character");
 #define JSON_ASSERT(expr) if (!(expr))exit(-1);
 
 namespace json {
@@ -30,33 +30,33 @@ static void CodePointToUTF8(String& s, UInt u) {
 		s += static_cast<char>(0x80 | (0x3F & u));
 	}
 }
-static UInt UTF8ToCodepoint(const char*& s, const char* e) {
+static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
 	const UInt REPLACEMENT_CHARACTER = 0xFFFD;
 
-	UInt firstByte = static_cast<unsigned char>(*s);
+	UInt firstByte = static_cast<unsigned char>(*cur);
 
 	if (firstByte < 0x80)
 		return firstByte;
 
 	if (firstByte < 0xE0) {
-		if (e - s < 2)
+		if (end - cur < 2)
 			return REPLACEMENT_CHARACTER;
 
 		UInt calculated =
-			((firstByte & 0x1F) << 6) | (static_cast<UInt>(s[1]) & 0x3F);
-		s += 1;
+			((firstByte & 0x1F) << 6) | (static_cast<UInt>(cur[1]) & 0x3F);
+		cur += 1;
 		// oversized encoded characters are invalid
 		return calculated < 0x80 ? REPLACEMENT_CHARACTER : calculated;
 	}
 
 	if (firstByte < 0xF0) {
-		if (e - s < 3)
+		if (end - cur < 3)
 			return REPLACEMENT_CHARACTER;
 
 		UInt calculated = ((firstByte & 0x0F) << 12) |
-			((static_cast<UInt>(s[1]) & 0x3F) << 6) |
-			(static_cast<UInt>(s[2]) & 0x3F);
-		s += 2;
+			((static_cast<UInt>(cur[1]) & 0x3F) << 6) |
+			(static_cast<UInt>(cur[2]) & 0x3F);
+		cur += 2;
 		// surrogates aren't valid codepoints itself
 		// shouldn't be UTF-8 encoded
 		if (calculated >= 0xD800 && calculated <= 0xDFFF)
@@ -66,14 +66,14 @@ static UInt UTF8ToCodepoint(const char*& s, const char* e) {
 	}
 
 	if (firstByte < 0xF8) {
-		if (e - s < 4)
+		if (end - cur < 4)
 			return REPLACEMENT_CHARACTER;
 
 		UInt calculated = ((firstByte & 0x07) << 18) |
-			((static_cast<UInt>(s[1]) & 0x3F) << 12) |
-			((static_cast<UInt>(s[2]) & 0x3F) << 6) |
-			(static_cast<UInt>(s[3]) & 0x3F);
-		s += 3;
+			((static_cast<UInt>(cur[1]) & 0x3F) << 12) |
+			((static_cast<UInt>(cur[2]) & 0x3F) << 6) |
+			(static_cast<UInt>(cur[3]) & 0x3F);
+		cur += 3;
 		// oversized encoded characters are invalid
 		return calculated < 0x10000 ? REPLACEMENT_CHARACTER : calculated;
 	}
@@ -121,18 +121,16 @@ bool Value::Parser::parse(const char* str, size_t len, Value& value) {
 	return parseValue(value);
 }
 String Value::Parser::getError() {
-	String e;
-	e += err_;
-	e += " in line ";
+	String err(err_);
 	size_t line = 1;
-	for (const char* i = begin_; i != cur_; ++i) {
-		if (*i == '\n')
-			++line;
-	}
+	err += " in line ";
+	// count the number of rows from begin_ to cur_
+	for (const char* cur = begin_; cur != cur_; ++cur)
+		if (*cur == '\n')++line;
 	char buffer[21]{ 0 };
 	std::to_chars(buffer, buffer + sizeof buffer, line);
-	e += buffer;
-	return e;
+	err += buffer;
+	return err;
 }
 bool Value::Parser::parseValue(Value& value) {
 	switch (*cur_) {
@@ -294,38 +292,41 @@ bool Value::Parser::parseObject(Value& value) {
 }
 //有问题！
 bool Value::Parser::parseNumber(Value& value) {
-	// from https://www.json.org/img/number.png
+	// refer https://www.json.org/img/number.png
 	double num;
-	const char* p = cur_;
-	// stopgap for already consumed character
-	char c = *p;
-	// skip '-'
+	// the last character
+	const char* end = cur_;
+	char c = *end;
 	if (c == '-')
-		c = *++p;
+		c = *++end;
+	if (c == '0') {
+		if (end[1] != '.')
+			return error("the first character of the number cannot be '0'");
+	}
 	// integral part
 	while (c >= '0' && c <= '9')
-		c = *++p;
+		c = *++end;
 	// fractional part
 	if (c == '.') {
-		c = *++p;
+		c = *++end;
 		while (c >= '0' && c <= '9')
-			c = *++p;
+			c = *++end;
 	}
 	// exponential part
 	if (c == 'e' || c == 'E') {
-		c = *++p;
+		c = *++end;
 		if (c == '+' || c == '-')
-			c = *++p;
+			c = *++end;
 		while (c >= '0' && c <= '9')
-			c = *++p;
+			c = *++end;
 	}
 	// check out of range
 	if (c == '\0')
 		return error("unexpected ending character");
-	if (p == cur_)
+	if (end == cur_)
 		return error("missing character");
-	std::from_chars(cur_, p, num);
-	cur_ = p;
+	std::from_chars(cur_, end, num);
+	cur_ = end;
 	value = num;
 	return true;
 }

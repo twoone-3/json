@@ -11,7 +11,7 @@ constexpr auto testjson = R"(
 	"az": {
 		"key":"value\n"
 	},
-	"edf":023,
+	"edf":0.2,
 	"edef":"\u3467АЁет",//зЂЪЭ
 	"wes":5058e100
 }
