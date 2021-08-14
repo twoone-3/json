@@ -1,14 +1,17 @@
 ﻿#include "json.h"
 #include <charconv>
 
+// If it is true, UTF8 string is allowed to be generated
 #define JSON_UTF8 0
-#define JSON_ALLOW_COMMENTS 0
+// If it is true, it is allowed to parse comments in the style of'//' or'/**/'
+#define JSON_ALLOW_COMMENTS 1
+// Number of indented spaces
 #define JSON_INDENT 4
 
 #define JSON_CHECK(expr) if (!(expr))return false;
 #define JSON_SKIP JSON_CHECK(skipWhiteSpace())
-#define JSON_CHECK_END if (cur_ == end_)return error("unexpected ending character");
-#define JSON_ASSERT(expr) if (!(expr))exit(-1);
+#define JSON_CHECK_OUT_OF_BOUNDS if (cur_ == end_)return error("unexpected ending character")
+#define JSON_ASSERT(expr) if (!(expr))exit(-1)
 
 namespace json {
 static void CodePointToUTF8(String& s, UInt u) {
@@ -113,11 +116,14 @@ bool Value::Parser::parse(const char* str, size_t len, Value& value) {
 	cur_ = str;
 	begin_ = str;
 	end_ = str + len;
-	//skip bom
+	// empty string
+	JSON_CHECK_OUT_OF_BOUNDS;
+	// skip BOM
 	if (cur_[0] == 0xEF && cur_[1] == 0xBB && cur_[2] == 0xBF)
 		cur_ += 3;
-	//skip whitespace
-	JSON_SKIP; JSON_CHECK_END;
+	// skip whitespace
+	JSON_SKIP;
+	JSON_CHECK_OUT_OF_BOUNDS;
 	return parseValue(value);
 }
 String Value::Parser::getError() {
@@ -149,7 +155,7 @@ bool Value::Parser::parseNull(Value& value) {
 		value = nullptr;
 		return true;
 	}
-	return false;
+	return error("Missing 'null'");
 }
 bool Value::Parser::parseTrue(Value& value) {
 	if (cur_[1] == 'r' && cur_[2] == 'u' && cur_[3] == 'e') {
@@ -157,7 +163,7 @@ bool Value::Parser::parseTrue(Value& value) {
 		value = true;
 		return true;
 	}
-	return false;
+	return error("Missing 'true'");
 }
 bool Value::Parser::parseFalse(Value& value) {
 	if (cur_[1] == 'a' && cur_[2] == 'l' && cur_[3] == 's' && cur_[4] == 'e') {
@@ -165,26 +171,24 @@ bool Value::Parser::parseFalse(Value& value) {
 		value = false;
 		return true;
 	}
-	return false;
+	return error("Missing 'false'");
 }
 bool Value::Parser::parseString(Value& value) {
 	value = kString;
 	return parseString(*value.data_.s);
 }
 bool Value::Parser::parseString(String& s) {
-	for (;;) {
+	while (true) {
 		// "xxxx"
 		// ^
 		char c = *++cur_;
-		if (c == '\0')
+		switch (c) {
+		case '\0':
 			return error("missing '\"'");
-		else if (c == '"') {
+		case '"':
 			++cur_;
 			return true;
-		}
-		else if (c == '\\') {
-			// "xx\nxx"
-			//    ^
+		case '\\':
 			switch (*++cur_) {
 			case '"': s += '"'; break;
 			case 'n': s += '\n'; break;
@@ -216,9 +220,13 @@ bool Value::Parser::parseString(String& s) {
 			default:
 				return error("invalid escape");
 			}
-		}
-		else
+			break;
+		default:
+			if (static_cast<unsigned char>(c) < ' ')
+				return error("The ASCII code of the characters in the string must be greater than 32");
 			s += c;
+			break;
+		}
 	}
 }
 bool Value::Parser::parseHex4(UInt& u) {
@@ -229,6 +237,7 @@ bool Value::Parser::parseHex4(UInt& u) {
 		// "x\u0123x"
 		//    ^
 		ch = *++cur_;
+		JSON_CHECK_OUT_OF_BOUNDS;
 		if (ch >= '0' && ch <= '9')
 			u |= ch - '0';
 		else if (ch >= 'a' && ch <= 'f')
@@ -242,12 +251,12 @@ bool Value::Parser::parseHex4(UInt& u) {
 }
 bool Value::Parser::parseArray(Value& value) {
 	++cur_;
-	JSON_SKIP;
 	value = kArray;
+	JSON_SKIP;
 	//empty array
 	if (*cur_ == ']')
 		return ++cur_, true;
-	for (;;) {
+	while (true) {
 		value.data_.a->push_back(nullptr);
 		JSON_SKIP;
 		JSON_CHECK(parseValue(value.data_.a->back()));
@@ -263,21 +272,23 @@ bool Value::Parser::parseArray(Value& value) {
 }
 bool Value::Parser::parseObject(Value& value) {
 	++cur_;
-	JSON_SKIP;
 	value = kObject;
+	JSON_SKIP;
 	//empty object
 	if (*cur_ == '}')
 		return ++cur_, true;
-	for (;;) {
+	while (true) {
 		String key;
 		JSON_SKIP;
 		if (*cur_ != '"')
 			return error("missing '\"'");
 		JSON_CHECK(parseString(key));
 		JSON_SKIP;
+		JSON_CHECK_OUT_OF_BOUNDS;
 		if (*cur_ != ':')
 			return error("missing ':'");
 		++cur_;
+		JSON_CHECK_OUT_OF_BOUNDS;
 		JSON_SKIP;
 		JSON_CHECK(parseValue(value.data_.o->operator[](key)));
 		JSON_SKIP;
@@ -290,15 +301,15 @@ bool Value::Parser::parseObject(Value& value) {
 			return error("missing ',' or '}'");
 	}
 }
-//有问题！
 bool Value::Parser::parseNumber(Value& value) {
-	// refer https://www.json.org/img/number.png
-	double num;
+	// Refer to https://www.json.org/img/number.png
 	// the last character
 	const char* end = cur_;
 	char c = *end;
+	// minus sign
 	if (c == '-')
 		c = *++end;
+	// first '0'
 	if (c == '0') {
 		if (end[1] != '.')
 			return error("the first character of the number cannot be '0'");
@@ -325,13 +336,14 @@ bool Value::Parser::parseNumber(Value& value) {
 		return error("unexpected ending character");
 	if (end == cur_)
 		return error("missing character");
+	double num;
 	std::from_chars(cur_, end, num);
 	cur_ = end;
 	value = num;
 	return true;
 }
 bool Value::Parser::skipWhiteSpace() {
-	while (cur_ < end_) {
+	while (true) {
 		switch (*cur_) {
 		case '\0':return error("unexpected ending character");
 		case '\t':
@@ -344,22 +356,19 @@ bool Value::Parser::skipWhiteSpace() {
 			++cur_;
 			if (*cur_ == '/') {
 				while (*++cur_ != '\n') {
-					if (cur_ == end_)
-						return error("unexpected ending character");
+					JSON_CHECK_OUT_OF_BOUNDS;
 				}
 				++cur_;
 				break;
 			}
 			else if (*cur_ == '*') {
 				while (*++cur_ != '*') {
-					if (cur_ == end_)
-						return error("unexpected ending character");
+					JSON_CHECK_OUT_OF_BOUNDS;
 				}
 				if (*++cur_ == '/') {
 					++cur_;
 					break;
 				}
-
 			}
 			else { return error("invalied comment style"); }
 #else
@@ -369,6 +378,7 @@ bool Value::Parser::skipWhiteSpace() {
 			return true;
 		}
 		++cur_;
+		JSON_CHECK_OUT_OF_BOUNDS;
 	}
 	return true;
 }
@@ -423,7 +433,7 @@ void Value::Writer::writeString(const Value& value) {
 	while (cur < end) {
 		char c = *cur;
 		switch (c) {
-		case '\"':out_ += "\\\""; break;
+		case '"':out_ += "\\\""; break;
 		case '\\':out_ += "\\\\"; break;
 		case '\b':out_ += "\\b"; break;
 		case '\f':out_ += "\\f"; break;
@@ -705,13 +715,6 @@ Double Value::asDouble()const { JSON_ASSERT(isNumber()); return data_.d; }
 String Value::asString()const { JSON_ASSERT(isString());	return *data_.s; }
 Array Value::asArray()const { JSON_ASSERT(isArray()); return *data_.a; }
 Object Value::asObject()const { JSON_ASSERT(isObject()); return *data_.o; }
-bool Value::isNull()const { return type_ == kNull; }
-bool Value::isBool()const { return type_ == kBoolean; }
-bool Value::isNumber()const { return type_ == kInteger || type_ == kUInteger || type_ == kReal; }
-bool Value::isString()const { return type_ == kString; }
-bool Value::isArray()const { return type_ == kArray; }
-bool Value::isObject()const { return type_ == kObject; }
-ValueType Value::getType()const { return type_; }
 void Value::swap(Value& other) {
 	std::swap(data_, other.data_);
 	std::swap(type_, other.type_);
@@ -785,7 +788,7 @@ bool Value::empty()const {
 	}
 	return false;
 }
-bool Value::has(const String& key)const {
+bool Value::contains(const String& key)const {
 	if (isObject())
 		return data_.o->find(key) != data_.o->end();
 	return false;
@@ -816,21 +819,18 @@ void Value::clear() {
 	}
 	type_ = kNull;
 }
-String Value::toShortString()const {
+String Value::toCompactString()const {
 	Writer w;
 	w.write(*this, false);
 	return w.getOutput();
 }
-String Value::toStyledString()const {
+String Value::toFormattedString()const {
 	Writer w;
 	w.write(*this, true);
 	return w.getOutput();
 }
-Value::operator String()const {
-	return toShortString();
-}
 std::ostream& operator<<(std::ostream& os, const Value& value) {
-	return os << value.toStyledString();
+	return os << value.toFormattedString();
 }
 Value Parse(const String& s) {
 	Value value;

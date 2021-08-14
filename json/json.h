@@ -2,7 +2,7 @@
 Author:
 	twoone3
 Last change:
-	2021.8.12
+	2021.8.14
 Github:
 	https://github.com/twoone-3/json
 Reference:
@@ -48,7 +48,7 @@ using Object = std::map<String, Value>;
 
 //Type of the value held by a Value object.
 enum ValueType :uint8_t {
-	kNull,		//'null' value
+	kNull,		//null value
 	kBoolean,	//bool value
 	kInteger,	//signed integer value
 	kUInteger,	//unsigned integer value
@@ -168,42 +168,40 @@ public:
 	String asString()const;
 	Array asArray()const;
 	Object asObject()const;
-	bool isNull()const;
-	bool isBool()const;
-	bool isNumber()const;
-	bool isString()const;
-	bool isArray()const;
-	bool isObject()const;
-	ValueType getType()const;
 	void swap(Value&);
-	//remove a key-value pair from object
+	// remove a key-value pair from object
 	bool remove(const String&);
-	//remove a value from array;
+	// remove a value from array;
 	bool remove(size_t);
-	//向数组追加元素
+	// add elements to the array
 	void append(const Value&);
-	//向数组追加元素
+	// add elements to the array
 	void append(Value&&);
-	//获取大小
+	// get size
 	size_t size()const;
-	//是否为空
 	bool empty()const;
-	//是否拥有某个键
-	bool has(const String&)const;
-	//清除内容
+	// check whether a certain key is included
+	bool contains(const String&)const;
+	// clear contents of value
 	void clear();
-	//转换成紧凑的字符串
-	String toShortString()const;
-	//转换成格式化的字符串
-	String toStyledString()const;
-	//automatic conversion
-	operator String()const;
+	// generate compact strings
+	String toCompactString()const;
+	// generate formatted string
+	String toFormattedString()const;
+	// get type
+	ValueType type()const { return type_; }
+	bool isNull()const { return type_ == kNull; }
+	bool isBool()const { return type_ == kBoolean; }
+	bool isNumber()const { return type_ == kInteger || type_ == kUInteger || type_ == kReal; }
+	bool isString()const { return type_ == kString; }
+	bool isArray()const { return type_ == kArray; }
+	bool isObject()const { return type_ == kObject; }
 private:
 	ValueData data_;
 	ValueType type_;
 };
-//io support
+// print the value
 std::ostream& operator<<(std::ostream&, const Value&);
-//parse string
+// parse a JSON string and output errors to stderr
 Value Parse(const String&);
 }// namespace Json

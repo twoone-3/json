@@ -8,8 +8,8 @@ using namespace std;
 
 constexpr auto testjson = R"(
 {
-	"az": {
-		"key":"value\n"
+	"az": {/* 
+		"key":"value\n"*/
 	},
 	"edf":0.2,
 	"edef":"\u3467АЁет",//зЂЪЭ
