@@ -1,13 +1,6 @@
 ﻿#include "json.h"
 #include <charconv>
 
-// If it is true, UTF8 string is allowed to be generated
-#define JSON_UTF8 0
-// If it is true, it is allowed to parse comments in the style of'//' or'/**/'
-#define JSON_ALLOW_COMMENTS 1
-// Number of indented spaces
-#define JSON_INDENT 4
-
 #define JSON_CHECK(expr) if (!(expr))return false;
 #define JSON_SKIP JSON_CHECK(skipWhiteSpace())
 #define JSON_CHECK_OUT_OF_BOUNDS if (cur_ == end_)return error("unexpected ending character")
@@ -34,7 +27,7 @@ static void CodePointToUTF8(String& s, UInt u) {
 	}
 }
 static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
-	const UInt REPLACEMENT_CHARACTER = 0xFFFD;
+	constexpr UInt REPLACEMENT_CHARACTER = 0xFFFD;
 
 	UInt firstByte = static_cast<unsigned char>(*cur);
 
@@ -109,13 +102,11 @@ static void writeHex16Bit(String& s, UInt u) {
 	s += hex2[2 * lo + 1];
 }
 
-bool Value::Parser::parse(const String& str, Value& value) {
-	return parse(str.c_str(), str.length(), value);
-}
-bool Value::Parser::parse(const char* str, size_t len, Value& value) {
-	cur_ = str;
-	begin_ = str;
-	end_ = str + len;
+bool Value::Parser::parse(StringView str, Value& value, bool allow_comments) {
+	cur_ = str.data();
+	begin_ = str.data();
+	end_ = str.data() + str.length();
+	allow_comments_ = allow_comments;
 	// empty string
 	JSON_CHECK_OUT_OF_BOUNDS;
 	// skip BOM
@@ -284,7 +275,6 @@ bool Value::Parser::parseObject(Value& value) {
 			return error("missing '\"'");
 		JSON_CHECK(parseString(key));
 		JSON_SKIP;
-		JSON_CHECK_OUT_OF_BOUNDS;
 		if (*cur_ != ':')
 			return error("missing ':'");
 		++cur_;
@@ -311,7 +301,8 @@ bool Value::Parser::parseNumber(Value& value) {
 		c = *++end;
 	// first '0'
 	if (c == '0') {
-		if (end[1] != '.')
+		c = *++end;
+		if (c >= '0' && c <= '9')
 			return error("the first character of the number cannot be '0'");
 	}
 	// integral part
@@ -352,7 +343,9 @@ bool Value::Parser::skipWhiteSpace() {
 		case ' ':
 			break;
 		case '/':
-#if JSON_ALLOW_COMMENTS
+			// If it is true, it is allowed to parse comments in the style of'//' or'/**/'
+			if (!allow_comments_)
+				return error("comments are not allowed here");
 			++cur_;
 			if (*cur_ == '/') {
 				while (*++cur_ != '\n') {
@@ -371,9 +364,6 @@ bool Value::Parser::skipWhiteSpace() {
 				}
 			}
 			else { return error("invalied comment style"); }
-#else
-			return error("comments are not allowed here");
-#endif
 		default:
 			return true;
 		}
@@ -387,23 +377,38 @@ bool Value::Parser::error(const char* err) {
 	return false;
 }
 
-void Value::Writer::write(const Value& value, bool styled) {
+Value::Writer::Writer(UInt indent_count, bool emit_utf8)
+	:out_(), depth_of_indentation_(0), indent_count_(indent_count), emit_utf8_(emit_utf8) {
+}
+void Value::Writer::writePrettyValue(const Value& value) {
 	switch (value.type_) {
 	case kNull:return writeNull();
 	case kBoolean:return writeBool(value);
 	case kInteger:return writeInt(value);
 	case kUInteger:return writeUInt(value);
 	case kReal:return writeDouble(value);
-	case kString:return writeString(value);
-	case kArray:return styled ? writePrettyArray(value) : writeArray(value);
-	case kObject:return styled ? writePrettyObject(value) : writeObject(value);
+	case kString:return writeString(*value.data_.s);
+	case kArray:return writePrettyArray(value);
+	case kObject:return writePrettyObject(value);
+	}
+}
+void Value::Writer::writeValue(const Value& value) {
+	switch (value.type_) {
+	case kNull:return writeNull();
+	case kBoolean:return writeBool(value);
+	case kInteger:return writeInt(value);
+	case kUInteger:return writeUInt(value);
+	case kReal:return writeDouble(value);
+	case kString:return writeString(*value.data_.s);
+	case kArray:return writeArray(value);
+	case kObject:return writeObject(value);
 	}
 }
 String Value::Writer::getOutput() {
 	return out_;
 }
 void Value::Writer::writeIndent() {
-	out_.append(indent_ * JSON_INDENT, ' ');
+	out_.append(depth_of_indentation_ * indent_count_, ' ');
 }
 void Value::Writer::writeNull() {
 	out_.append("null", 4);
@@ -426,9 +431,9 @@ void Value::Writer::writeDouble(const Value& value) {
 	std::to_chars(buffer, buffer + sizeof buffer, value.data_.d);
 	out_.append(buffer);
 }
-void Value::Writer::writeString(const Value& value) {
-	const char* cur = value.data_.s->c_str();
-	const char* end = cur + value.data_.s->length();
+void Value::Writer::writeString(StringView str) {
+	const char* cur = str.data();
+	const char* end = cur + str.length();
 	out_ += '"';
 	while (cur < end) {
 		char c = *cur;
@@ -440,49 +445,49 @@ void Value::Writer::writeString(const Value& value) {
 		case '\n':out_ += "\\n"; break;
 		case '\r':out_ += "\\r"; break;
 		case '\t':out_ += "\\t"; break;
-		default: {
-#if JSON_UTF8
-			if (uint8_t(c) < 0x20) {
-				out_ += "\\u";
-				writeHex16Bit(out_, c);
+		default:
+			if (emit_utf8_) {
+				if (uint8_t(c) < 0x20) {
+					out_ += "\\u";
+					writeHex16Bit(out_, c);
+				}
+				else {
+					out_ += c;
+				}
 			}
 			else {
-				out_ += c;
+				UInt codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
+				if (codepoint < 0x20) {
+					out_ += "\\u";
+					writeHex16Bit(out_, codepoint);
+				}
+				else if (codepoint < 0x80) {
+					out_ += static_cast<char>(codepoint);
+				}
+				else if (codepoint < 0x10000) {
+					// Basic Multilingual Plane
+					out_ += "\\u";
+					writeHex16Bit(out_, codepoint);
+				}
+				else {
+					// Extended Unicode. Encode 20 bits as a surrogate pair.
+					codepoint -= 0x10000;
+					out_ += "\\u";
+					writeHex16Bit(out_, 0xD800 + ((codepoint >> 10) & 0x3FF));
+					writeHex16Bit(out_, 0xDC00 + (codepoint & 0x3FF));
+				}
+				break;
+			}
 		}
-#else
-			UInt codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
-			if (codepoint < 0x20) {
-				out_ += "\\u";
-				writeHex16Bit(out_, codepoint);
-			}
-			else if (codepoint < 0x80) {
-				out_ += static_cast<char>(codepoint);
-			}
-			else if (codepoint < 0x10000) {
-				// Basic Multilingual Plane
-				out_ += "\\u";
-				writeHex16Bit(out_, codepoint);
-			}
-			else {
-				// Extended Unicode. Encode 20 bits as a surrogate pair.
-				codepoint -= 0x10000;
-				out_ += "\\u";
-				writeHex16Bit(out_, 0xD800 + ((codepoint >> 10) & 0x3FF));
-				writeHex16Bit(out_, 0xDC00 + (codepoint & 0x3FF));
-			}
-#endif
-			break;
-	}
-}
 		++cur;
-}
+	}
 	out_ += '"';
 }
 void Value::Writer::writeArray(const Value& value) {
 	out_ += '[';
 	if (!value.data_.a->empty()) {
-		for (auto& x : *value.data_.a) {
-			write(x, false);
+		for (auto& val : *value.data_.a) {
+			writeValue(val);
 			out_ += ',';
 		}
 		out_.pop_back();
@@ -493,10 +498,10 @@ void Value::Writer::writeArray(const Value& value) {
 void Value::Writer::writeObject(const Value& value) {
 	out_ += '{';
 	if (!value.data_.o->empty()) {
-		for (auto& x : *value.data_.o) {
-			writeString(x.first);
+		for (auto& [key, val] : *value.data_.o) {
+			writeString(key);
 			out_ += ':';
-			write(x.second, false);
+			writeValue(val);
 			out_ += ',';
 		}
 		out_.pop_back();
@@ -507,14 +512,14 @@ void Value::Writer::writePrettyArray(const Value& value) {
 	out_ += '[';
 	if (!value.data_.a->empty()) {
 		out_ += '\n';
-		++indent_;
-		for (auto& x : *value.data_.a) {
+		++depth_of_indentation_;
+		for (auto& val : *value.data_.a) {
 			writeIndent();
-			write(x, true);
+			writePrettyValue(val);
 			out_ += ',';
 			out_ += '\n';
 		}
-		--indent_;
+		--depth_of_indentation_;
 		out_.pop_back();
 		out_.pop_back();
 		out_ += '\n';
@@ -526,17 +531,17 @@ void Value::Writer::writePrettyObject(const Value& value) {
 	out_ += '{';
 	if (!value.data_.o->empty()) {
 		out_ += '\n';
-		++indent_;
-		for (auto& x : *value.data_.o) {
+		++depth_of_indentation_;
+		for (auto& [key, val] : *value.data_.o) {
 			writeIndent();
-			writeString(x.first);
+			writeString(key);
 			out_ += ':';
 			out_ += ' ';
-			write(x.second, true);
+			writePrettyValue(val);
 			out_ += ',';
 			out_ += '\n';
 		}
-		--indent_;
+		--depth_of_indentation_;
 		out_.pop_back();
 		out_.pop_back();
 		out_ += '\n';
@@ -553,19 +558,17 @@ Value::ValueData::ValueData(Int64 value) : i64(value) {}
 Value::ValueData::ValueData(UInt64 value) : u64(value) {}
 Value::ValueData::ValueData(Float value) : f(value) {}
 Value::ValueData::ValueData(Double value) : d(value) {}
-Value::ValueData::ValueData(const char* value) : s(new String(value)) {}
-Value::ValueData::ValueData(const String& value) : s(new String(value)) {}
-Value::ValueData::ValueData(String&& value) : s(new String(move(value))) {}
+Value::ValueData::ValueData(StringView value) : s(new (std::nothrow)String(value)) {}
 Value::ValueData::ValueData(ValueType type) {
 	switch (type) {
 	case json::kString:
-		s = new String;
+		s = new (std::nothrow)String;
 		break;
 	case json::kArray:
-		a = new Array;
+		a = new (std::nothrow)Array;
 		break;
 	case json::kObject:
-		o = new Object;
+		o = new (std::nothrow)Object;
 		break;
 	}
 }
@@ -586,13 +589,13 @@ Value::ValueData::ValueData(const ValueData& other, ValueType type) {
 		d = other.d;
 		break;
 	case kString:
-		s = new String(*other.s);
+		s = new (std::nothrow)String(*other.s);
 		break;
 	case kArray:
-		a = new Array(*other.a);
+		a = new (std::nothrow)Array(*other.a);
 		break;
 	case kObject:
-		o = new Object(*other.o);
+		o = new (std::nothrow)Object(*other.o);
 		break;
 	default:
 		break;
@@ -631,9 +634,7 @@ Value::Value(Int64 value) : data_(value), type_(kInteger) {}
 Value::Value(UInt64 value) : data_(value), type_(kUInteger) {}
 Value::Value(Float value) : data_(value), type_(kReal) {}
 Value::Value(Double value) : data_(value), type_(kReal) {}
-Value::Value(const char* value) : data_(value), type_(kString) {}
-Value::Value(const String& value) : data_(value), type_(kString) {}
-Value::Value(String&& value) : data_(move(value)), type_(kString) {}
+Value::Value(StringView value) : data_(value), type_(kString) {}
 Value::Value(ValueType type) : data_(type), type_(type) {};
 Value::Value(const Value& other) :data_(other.data_, other.type_), type_(other.type_) {};
 Value::Value(Value&& other)noexcept :data_(move(other.data_)), type_(other.type_) {
@@ -682,13 +683,13 @@ bool Value::operator==(const Value& other)const {
 Value& Value::operator[](const String& index) {
 	JSON_ASSERT(isObject() || isNull());
 	if (isNull())
-		new (this)Value(kObject);
+		*this = kObject;
 	return data_.o->operator[](index);
 }
 Value& Value::operator[](size_t index) {
 	JSON_ASSERT(isArray() || isNull());
 	if (isNull())
-		new (this)Value(kArray);
+		*this = kArray;
 	auto begin = data_.a->begin();
 	while (begin != data_.a->end()) {
 		--index;
@@ -702,7 +703,7 @@ Value& Value::operator[](size_t index) {
 void Value::insert(const String& index, Value&& value) {
 	JSON_ASSERT(isObject() || isNull());
 	if (isNull())
-		new (this)Value(kObject);
+		*this = kObject;
 	data_.o->emplace(index, value);
 }
 bool Value::asBool()const { JSON_ASSERT(isBool()); return data_.b; }
@@ -739,7 +740,7 @@ void Value::append(const Value& value) {
 void Value::append(Value&& value) {
 	JSON_ASSERT(isArray() || isNull());
 	if (isNull())
-		new (this)Value(kArray);
+		*this = kArray;
 	data_.a->push_back(move(value));
 }
 size_t Value::size()const {
@@ -819,24 +820,24 @@ void Value::clear() {
 	}
 	type_ = kNull;
 }
-String Value::toCompactString()const {
-	Writer w;
-	w.write(*this, false);
-	return w.getOutput();
-}
-String Value::toFormattedString()const {
-	Writer w;
-	w.write(*this, true);
+String Value::dump(UInt indent_count, bool emit_utf8)const {
+	Writer w(indent_count, emit_utf8);
+	if (indent_count > 0)
+		w.writePrettyValue(*this);
+	else
+		w.writeValue(*this);
 	return w.getOutput();
 }
 std::ostream& operator<<(std::ostream& os, const Value& value) {
-	return os << value.toFormattedString();
+	return os << value.dump();
 }
-Value Parse(const String& s) {
+Value Parse(StringView str, String* err, bool allow_comments) {
 	Value value;
 	Value::Parser parser;
-	if (!parser.parse(s, value))
-		std::cerr << parser.getError() << std::endl;
+	bool success = parser.parse(str, value, allow_comments);
+	if (err && !success) {
+		*err = parser.getError();
+	}
 	return value;
 }
 } // namespace Json
