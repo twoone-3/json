@@ -1,13 +1,16 @@
 ﻿#include "json.h"
 #include <charconv>
 
-#define JSON_CHECK(expr) if (!(expr))return false;
-#define JSON_SKIP JSON_CHECK(skipWhiteSpace())
-#define JSON_CHECK_OUT_OF_BOUNDS if (cur_ == end_)return error("unexpected ending character")
-#define JSON_ASSERT(expr) if (!(expr))exit(-1)
+#define JSON_SKIP_WHITE_SPACE if(!skipWhiteSpace())return false
+#define JSON_CHECK_OUT_OF_RANGE if (cur_ == end_)return error("unexpected ending character")
+#define JSON_ASSERT(expr,msg) if (!(expr))Fatal(msg)
 
 namespace json {
-static void CodePointToUTF8(String& s, UInt u) {
+static void Fatal(const char* msg) {
+	std::cerr << msg << std::endl;
+	exit(-1);
+}
+static void CodePointToUTF8(std::string& s, unsigned u) {
 	if (u <= 0x7F)
 		s += static_cast<char>(u & 0xFF);
 	else if (u <= 0x7FF) {
@@ -26,10 +29,10 @@ static void CodePointToUTF8(String& s, UInt u) {
 		s += static_cast<char>(0x80 | (0x3F & u));
 	}
 }
-static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
-	constexpr UInt REPLACEMENT_CHARACTER = 0xFFFD;
+static unsigned UTF8ToCodepoint(const char*& cur, const char* end) {
+	constexpr unsigned REPLACEMENT_CHARACTER = 0xFFFD;
 
-	UInt firstByte = static_cast<unsigned char>(*cur);
+	unsigned firstByte = static_cast<unsigned char>(*cur);
 
 	if (firstByte < 0x80)
 		return firstByte;
@@ -38,8 +41,8 @@ static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
 		if (end - cur < 2)
 			return REPLACEMENT_CHARACTER;
 
-		UInt calculated =
-			((firstByte & 0x1F) << 6) | (static_cast<UInt>(cur[1]) & 0x3F);
+		unsigned calculated =
+			((firstByte & 0x1F) << 6) | (static_cast<unsigned>(cur[1]) & 0x3F);
 		cur += 1;
 		// oversized encoded characters are invalid
 		return calculated < 0x80 ? REPLACEMENT_CHARACTER : calculated;
@@ -49,9 +52,9 @@ static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
 		if (end - cur < 3)
 			return REPLACEMENT_CHARACTER;
 
-		UInt calculated = ((firstByte & 0x0F) << 12) |
-			((static_cast<UInt>(cur[1]) & 0x3F) << 6) |
-			(static_cast<UInt>(cur[2]) & 0x3F);
+		unsigned calculated = ((firstByte & 0x0F) << 12) |
+			((static_cast<unsigned>(cur[1]) & 0x3F) << 6) |
+			(static_cast<unsigned>(cur[2]) & 0x3F);
 		cur += 2;
 		// surrogates aren't valid codepoints itself
 		// shouldn't be UTF-8 encoded
@@ -65,10 +68,10 @@ static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
 		if (end - cur < 4)
 			return REPLACEMENT_CHARACTER;
 
-		UInt calculated = ((firstByte & 0x07) << 18) |
-			((static_cast<UInt>(cur[1]) & 0x3F) << 12) |
-			((static_cast<UInt>(cur[2]) & 0x3F) << 6) |
-			(static_cast<UInt>(cur[3]) & 0x3F);
+		unsigned calculated = ((firstByte & 0x07) << 18) |
+			((static_cast<unsigned>(cur[1]) & 0x3F) << 12) |
+			((static_cast<unsigned>(cur[2]) & 0x3F) << 6) |
+			(static_cast<unsigned>(cur[3]) & 0x3F);
 		cur += 3;
 		// oversized encoded characters are invalid
 		return calculated < 0x10000 ? REPLACEMENT_CHARACTER : calculated;
@@ -76,7 +79,7 @@ static UInt UTF8ToCodepoint(const char*& cur, const char* end) {
 
 	return REPLACEMENT_CHARACTER;
 }
-static void writeHex16Bit(String& s, UInt u) {
+static void writeHex16Bit(std::string& s, unsigned u) {
 	constexpr const char hex2[513] =
 		"000102030405060708090a0b0c0d0e0f"
 		"101112131415161718191a1b1c1d1e1f"
@@ -94,33 +97,43 @@ static void writeHex16Bit(String& s, UInt u) {
 		"d0d1d2d3d4d5d6d7d8d9dadbdcdddedf"
 		"e0e1e2e3e4e5e6e7e8e9eaebecedeeef"
 		"f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff";
-	const UInt hi = (u >> 8) & 0xFF;
-	const UInt lo = u & 0xFF;
+	const unsigned hi = (u >> 8) & 0xFF;
+	const unsigned lo = u & 0xFF;
 	s += hex2[2 * hi];
 	s += hex2[2 * hi + 1];
 	s += hex2[2 * lo];
 	s += hex2[2 * lo + 1];
 }
 
-bool Value::Parser::parse(StringView str, Value& value, bool allow_comments) {
+Parser::Parser() :
+	cur_(nullptr), begin_(nullptr), end_(nullptr), err_(nullptr),
+	allow_comments_(false) {
+}
+Parser& Parser::allowComments() {
+	allow_comments_ = true;
+	return *this;
+}
+bool Parser::parse(std::string_view str, Value& value) {
 	cur_ = str.data();
 	begin_ = str.data();
 	end_ = str.data() + str.length();
-	allow_comments_ = allow_comments;
 	// empty string
-	JSON_CHECK_OUT_OF_BOUNDS;
+	JSON_CHECK_OUT_OF_RANGE;
 	// skip BOM
 	if (cur_[0] == 0xEF && cur_[1] == 0xBB && cur_[2] == 0xBF)
 		cur_ += 3;
 	// skip whitespace
-	JSON_SKIP;
-	JSON_CHECK_OUT_OF_BOUNDS;
-	return parseValue(value);
+	JSON_SKIP_WHITE_SPACE;
+	JSON_CHECK_OUT_OF_RANGE;
+	bool result= parseValue(value);
+	if (!result)
+		value = nullptr;
+	return result;
 }
-String Value::Parser::getError() {
-	String err(err_);
-	size_t line = 1;
+std::string Parser::getError() {
+	std::string err(err_);
 	err += " in line ";
+	size_t line = 1;
 	// count the number of rows from begin_ to cur_
 	for (const char* cur = begin_; cur != cur_; ++cur)
 		if (*cur == '\n')++line;
@@ -129,7 +142,7 @@ String Value::Parser::getError() {
 	err += buffer;
 	return err;
 }
-bool Value::Parser::parseValue(Value& value) {
+bool Parser::parseValue(Value& value) {
 	switch (*cur_) {
 	case 'n':return parseNull(value);
 	case 't':return parseTrue(value);
@@ -140,7 +153,7 @@ bool Value::Parser::parseValue(Value& value) {
 	default:return parseNumber(value);
 	}
 }
-bool Value::Parser::parseNull(Value& value) {
+bool Parser::parseNull(Value& value) {
 	if (cur_[1] == 'u' && cur_[2] == 'l' && cur_[3] == 'l') {
 		cur_ += 4;
 		value = nullptr;
@@ -148,7 +161,7 @@ bool Value::Parser::parseNull(Value& value) {
 	}
 	return error("Missing 'null'");
 }
-bool Value::Parser::parseTrue(Value& value) {
+bool Parser::parseTrue(Value& value) {
 	if (cur_[1] == 'r' && cur_[2] == 'u' && cur_[3] == 'e') {
 		cur_ += 4;
 		value = true;
@@ -156,7 +169,7 @@ bool Value::Parser::parseTrue(Value& value) {
 	}
 	return error("Missing 'true'");
 }
-bool Value::Parser::parseFalse(Value& value) {
+bool Parser::parseFalse(Value& value) {
 	if (cur_[1] == 'a' && cur_[2] == 'l' && cur_[3] == 's' && cur_[4] == 'e') {
 		cur_ += 5;
 		value = false;
@@ -164,11 +177,11 @@ bool Value::Parser::parseFalse(Value& value) {
 	}
 	return error("Missing 'false'");
 }
-bool Value::Parser::parseString(Value& value) {
-	value = kString;
+bool Parser::parseString(Value& value) {
+	value = Type::kString;
 	return parseString(*value.data_.s);
 }
-bool Value::Parser::parseString(String& s) {
+bool Parser::parseString(std::string& s) {
 	while (true) {
 		// "xxxx"
 		// ^
@@ -190,14 +203,15 @@ bool Value::Parser::parseString(String& s) {
 			case '/': s += '/'; break;
 			case '\\': s += '\\'; break;
 			case 'u': {
-				UInt u = 0;
-				JSON_CHECK(parseHex4(u));
+				unsigned u = 0;
+				if (!parseHex4(u))
+					return false;
 				if (u >= 0xD800 && u <= 0xDBFF) {
 					// "x\u0123\u0234xx"
 					//        ^
 					if (cur_[1] == '\\' && cur_[2] == 'u') {
 						cur_ += 2;
-						UInt surrogatePair = 0;
+						unsigned surrogatePair = 0;
 						if (!parseHex4(surrogatePair))
 							u = 0x10000 + ((u & 0x3FF) << 10) + (surrogatePair & 0x3FF);
 						else
@@ -220,15 +234,15 @@ bool Value::Parser::parseString(String& s) {
 		}
 	}
 }
-bool Value::Parser::parseHex4(UInt& u) {
+bool Parser::parseHex4(unsigned& u) {
 	//u = 0;
 	char ch = 0;
-	for (UInt i = 0; i < 4; ++i) {
+	for (unsigned i = 0; i < 4; ++i) {
 		u <<= 4;
 		// "x\u0123x"
 		//    ^
 		ch = *++cur_;
-		JSON_CHECK_OUT_OF_BOUNDS;
+		JSON_CHECK_OUT_OF_RANGE;
 		if (ch >= '0' && ch <= '9')
 			u |= ch - '0';
 		else if (ch >= 'a' && ch <= 'f')
@@ -240,18 +254,19 @@ bool Value::Parser::parseHex4(UInt& u) {
 	}
 	return true;
 }
-bool Value::Parser::parseArray(Value& value) {
+bool Parser::parseArray(Value& value) {
 	++cur_;
-	value = kArray;
-	JSON_SKIP;
+	value = Type::kArray;
+	JSON_SKIP_WHITE_SPACE;
 	//empty array
 	if (*cur_ == ']')
 		return ++cur_, true;
 	while (true) {
 		value.data_.a->push_back(nullptr);
-		JSON_SKIP;
-		JSON_CHECK(parseValue(value.data_.a->back()));
-		JSON_SKIP;
+		JSON_SKIP_WHITE_SPACE;
+		if (!parseValue(value.data_.a->back()))
+			return false;
+		JSON_SKIP_WHITE_SPACE;
 		char ch = *cur_;
 		if (ch == ',')
 			++cur_;
@@ -261,27 +276,29 @@ bool Value::Parser::parseArray(Value& value) {
 			return error("missing ',' or ']'");
 	}
 }
-bool Value::Parser::parseObject(Value& value) {
+bool Parser::parseObject(Value& value) {
 	++cur_;
-	value = kObject;
-	JSON_SKIP;
+	value = Type::kObject;
+	JSON_SKIP_WHITE_SPACE;
 	//empty object
 	if (*cur_ == '}')
 		return ++cur_, true;
 	while (true) {
-		String key;
-		JSON_SKIP;
+		std::string key;
+		JSON_SKIP_WHITE_SPACE;
 		if (*cur_ != '"')
 			return error("missing '\"'");
-		JSON_CHECK(parseString(key));
-		JSON_SKIP;
+		if (!parseString(key))
+			return false;
+		JSON_SKIP_WHITE_SPACE;
 		if (*cur_ != ':')
 			return error("missing ':'");
 		++cur_;
-		JSON_CHECK_OUT_OF_BOUNDS;
-		JSON_SKIP;
-		JSON_CHECK(parseValue(value.data_.o->operator[](key)));
-		JSON_SKIP;
+		JSON_CHECK_OUT_OF_RANGE;
+		JSON_SKIP_WHITE_SPACE;
+		if (!parseValue(value.data_.o->operator[](key)))
+			return false;
+		JSON_SKIP_WHITE_SPACE;
 		char ch = *cur_;
 		if (ch == ',')
 			++cur_;
@@ -291,49 +308,18 @@ bool Value::Parser::parseObject(Value& value) {
 			return error("missing ',' or '}'");
 	}
 }
-bool Value::Parser::parseNumber(Value& value) {
-	// Refer to https://www.json.org/img/number.png
-	// the last character
-	const char* end = cur_;
-	char c = *end;
-	// minus sign
-	if (c == '-')
-		c = *++end;
-	// first '0'
-	if (c == '0') {
-		c = *++end;
-		if (c >= '0' && c <= '9')
-			return error("the first character of the number cannot be '0'");
+bool Parser::parseNumber(Value& value) {
+	/* Refer to https://www.json.org/img/number.png */
+	double num = 0.0;
+	auto result = std::from_chars(cur_, end_, num);
+	cur_ = result.ptr;
+	if (result.ec == std::errc::result_out_of_range) {
+		return error("number out of range");
 	}
-	// integral part
-	while (c >= '0' && c <= '9')
-		c = *++end;
-	// fractional part
-	if (c == '.') {
-		c = *++end;
-		while (c >= '0' && c <= '9')
-			c = *++end;
-	}
-	// exponential part
-	if (c == 'e' || c == 'E') {
-		c = *++end;
-		if (c == '+' || c == '-')
-			c = *++end;
-		while (c >= '0' && c <= '9')
-			c = *++end;
-	}
-	// check out of range
-	if (c == '\0')
-		return error("unexpected ending character");
-	if (end == cur_)
-		return error("missing character");
-	double num;
-	std::from_chars(cur_, end, num);
-	cur_ = end;
 	value = num;
 	return true;
 }
-bool Value::Parser::skipWhiteSpace() {
+bool Parser::skipWhiteSpace() {
 	while (true) {
 		switch (*cur_) {
 		case '\0':return error("unexpected ending character");
@@ -349,14 +335,14 @@ bool Value::Parser::skipWhiteSpace() {
 			++cur_;
 			if (*cur_ == '/') {
 				while (*++cur_ != '\n') {
-					JSON_CHECK_OUT_OF_BOUNDS;
+					JSON_CHECK_OUT_OF_RANGE;
 				}
 				++cur_;
 				break;
 			}
 			else if (*cur_ == '*') {
 				while (*++cur_ != '*') {
-					JSON_CHECK_OUT_OF_BOUNDS;
+					JSON_CHECK_OUT_OF_RANGE;
 				}
 				if (*++cur_ == '/') {
 					++cur_;
@@ -368,70 +354,62 @@ bool Value::Parser::skipWhiteSpace() {
 			return true;
 		}
 		++cur_;
-		JSON_CHECK_OUT_OF_BOUNDS;
+		JSON_CHECK_OUT_OF_RANGE;
 	}
 	return true;
 }
-bool Value::Parser::error(const char* err) {
+bool Parser::error(const char* err) {
 	err_ = err;
 	return false;
 }
 
-Value::Writer::Writer(UInt indent_count, bool emit_utf8)
-	:out_(), depth_of_indentation_(0), indent_count_(indent_count), emit_utf8_(emit_utf8) {
+Writer::Writer() :
+	out_(), depth_of_indentation_(0),
+	emit_utf8_(false) {
 }
-void Value::Writer::writePrettyValue(const Value& value) {
+Writer& Writer::emit_utf8() {
+	emit_utf8_ = true;
+	return *this;
+}
+void Writer::writePrettyValue(const Value& value) {
 	switch (value.type_) {
-	case kNull:return writeNull();
-	case kBoolean:return writeBool(value);
-	case kInteger:return writeInt(value);
-	case kUInteger:return writeUInt(value);
-	case kReal:return writeDouble(value);
-	case kString:return writeString(*value.data_.s);
-	case kArray:return writePrettyArray(value);
-	case kObject:return writePrettyObject(value);
+	case Type::kNull:return writeNull();
+	case Type::kBoolean:return writeBoolean(value);
+	case Type::kNumber:return writeNumber(value);
+	case Type::kString:return writeString(*value.data_.s);
+	case Type::kArray:return writePrettyArray(value);
+	case Type::kObject:return writePrettyObject(value);
 	}
 }
-void Value::Writer::writeValue(const Value& value) {
+void Writer::writeValue(const Value& value) {
 	switch (value.type_) {
-	case kNull:return writeNull();
-	case kBoolean:return writeBool(value);
-	case kInteger:return writeInt(value);
-	case kUInteger:return writeUInt(value);
-	case kReal:return writeDouble(value);
-	case kString:return writeString(*value.data_.s);
-	case kArray:return writeArray(value);
-	case kObject:return writeObject(value);
+	case Type::kNull:return writeNull();
+	case Type::kBoolean:return writeBoolean(value);
+	case Type::kNumber:return writeNumber(value);
+	case Type::kString:return writeString(*value.data_.s);
+	case Type::kArray:return writeArray(value);
+	case Type::kObject:return writeObject(value);
 	}
 }
-String Value::Writer::getOutput() {
+const std::string& Writer::getOutput()const {
 	return out_;
 }
-void Value::Writer::writeIndent() {
-	out_.append(depth_of_indentation_ * indent_count_, ' ');
+void Writer::writeIndent() {
+	for (unsigned i = depth_of_indentation_; i; --i)
+		out_ += JSON_INDENT;
 }
-void Value::Writer::writeNull() {
+void Writer::writeNull() {
 	out_.append("null", 4);
 }
-void Value::Writer::writeBool(const Value& value) {
+void Writer::writeBoolean(const Value& value) {
 	value.data_.b ? out_.append("true", 4) : out_.append("false", 5);
 }
-void Value::Writer::writeInt(const Value& value) {
+void Writer::writeNumber(const Value& value) {
 	char buffer[21]{ 0 };
-	std::to_chars(buffer, buffer + sizeof buffer, value.data_.i64);
+	std::to_chars(buffer, buffer + sizeof buffer, value.data_.n);
 	out_.append(buffer);
 }
-void Value::Writer::writeUInt(const Value& value) {
-	char buffer[21]{ 0 };
-	std::to_chars(buffer, buffer + sizeof buffer, value.data_.u64);
-	out_.append(buffer);
-}
-void Value::Writer::writeDouble(const Value& value) {
-	char buffer[21]{ 0 };
-	std::to_chars(buffer, buffer + sizeof buffer, value.data_.d);
-	out_.append(buffer);
-}
-void Value::Writer::writeString(StringView str) {
+void Writer::writeString(std::string_view str) {
 	const char* cur = str.data();
 	const char* end = cur + str.length();
 	out_ += '"';
@@ -456,7 +434,7 @@ void Value::Writer::writeString(StringView str) {
 				}
 			}
 			else {
-				UInt codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
+				unsigned codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
 				if (codepoint < 0x20) {
 					out_ += "\\u";
 					writeHex16Bit(out_, codepoint);
@@ -483,7 +461,7 @@ void Value::Writer::writeString(StringView str) {
 	}
 	out_ += '"';
 }
-void Value::Writer::writeArray(const Value& value) {
+void Writer::writeArray(const Value& value) {
 	out_ += '[';
 	if (!value.data_.a->empty()) {
 		for (auto& val : *value.data_.a) {
@@ -495,7 +473,7 @@ void Value::Writer::writeArray(const Value& value) {
 	out_ += ']';
 
 }
-void Value::Writer::writeObject(const Value& value) {
+void Writer::writeObject(const Value& value) {
 	out_ += '{';
 	if (!value.data_.o->empty()) {
 		for (auto& [key, val] : *value.data_.o) {
@@ -508,7 +486,7 @@ void Value::Writer::writeObject(const Value& value) {
 	}
 	out_ += '}';
 }
-void Value::Writer::writePrettyArray(const Value& value) {
+void Writer::writePrettyArray(const Value& value) {
 	out_ += '[';
 	if (!value.data_.a->empty()) {
 		out_ += '\n';
@@ -516,8 +494,7 @@ void Value::Writer::writePrettyArray(const Value& value) {
 		for (auto& val : *value.data_.a) {
 			writeIndent();
 			writePrettyValue(val);
-			out_ += ',';
-			out_ += '\n';
+			out_ += ",\n";
 		}
 		--depth_of_indentation_;
 		out_.pop_back();
@@ -527,7 +504,7 @@ void Value::Writer::writePrettyArray(const Value& value) {
 	}
 	out_ += ']';
 }
-void Value::Writer::writePrettyObject(const Value& value) {
+void Writer::writePrettyObject(const Value& value) {
 	out_ += '{';
 	if (!value.data_.o->empty()) {
 		out_ += '\n';
@@ -535,11 +512,9 @@ void Value::Writer::writePrettyObject(const Value& value) {
 		for (auto& [key, val] : *value.data_.o) {
 			writeIndent();
 			writeString(key);
-			out_ += ':';
-			out_ += ' ';
+			out_ += ": ";
 			writePrettyValue(val);
-			out_ += ',';
-			out_ += '\n';
+			out_ += ",\n";
 		}
 		--depth_of_indentation_;
 		out_.pop_back();
@@ -550,100 +525,94 @@ void Value::Writer::writePrettyObject(const Value& value) {
 	out_ += '}';
 }
 
-Value::ValueData::ValueData() {}
-Value::ValueData::ValueData(bool value) : b(value) {}
-Value::ValueData::ValueData(Int value) : i(value) {}
-Value::ValueData::ValueData(UInt value) : u(value) {}
-Value::ValueData::ValueData(Int64 value) : i64(value) {}
-Value::ValueData::ValueData(UInt64 value) : u64(value) {}
-Value::ValueData::ValueData(Float value) : f(value) {}
-Value::ValueData::ValueData(Double value) : d(value) {}
-Value::ValueData::ValueData(StringView value) : s(new (std::nothrow)String(value)) {}
-Value::ValueData::ValueData(ValueType type) {
+Value::Data::Data() {}
+Value::Data::Data(bool value) : b(value) {}
+Value::Data::Data(int value) : n(value) {}
+Value::Data::Data(unsigned value) : n(value) {}
+Value::Data::Data(int64_t value) : n(static_cast<double>(value)) {}
+Value::Data::Data(uint64_t value) : n(static_cast<double>(value)) {}
+Value::Data::Data(double value) : n(value) {}
+Value::Data::Data(const char* value) : s(new (std::nothrow)std::string(value)) {}
+Value::Data::Data(const std::string& value) : s(new (std::nothrow)std::string(value)) {}
+Value::Data::Data(const Array& value) : a(new (std::nothrow)Array(value)) {}
+Value::Data::Data(const Object& value) : o(new (std::nothrow)Object(value)) {}
+Value::Data::Data(const Type type) {
 	switch (type) {
-	case json::kString:
-		s = new (std::nothrow)String;
+	case Type::kString:
+		s = new (std::nothrow)std::string;
 		break;
-	case json::kArray:
+	case Type::kArray:
 		a = new (std::nothrow)Array;
 		break;
-	case json::kObject:
+	case Type::kObject:
 		o = new (std::nothrow)Object;
 		break;
-	}
-}
-Value::ValueData::ValueData(const ValueData& other, ValueType type) {
-	switch (type) {
-	case kNull:
-		break;
-	case kBoolean:
-		b = other.b;
-		break;
-	case kInteger:
-		i64 = other.i64;
-		break;
-	case kUInteger:
-		u64 = other.u64;
-		break;
-	case kReal:
-		d = other.d;
-		break;
-	case kString:
-		s = new (std::nothrow)String(*other.s);
-		break;
-	case kArray:
-		a = new (std::nothrow)Array(*other.a);
-		break;
-	case kObject:
-		o = new (std::nothrow)Object(*other.o);
-		break;
 	default:
-		break;
+		o = nullptr;
 	}
-
 }
-Value::ValueData::ValueData(ValueData&& other) {
-	u64 = other.u64;
+Value::Data::Data(const Data& other) {
+	o = other.o;
 }
-void Value::ValueData::assign(const ValueData& other, ValueType type) {
-	operator=(ValueData(other, type));
+Value::Data::Data(Data&& other) {
+	o = other.o;
+	other.o = nullptr;
 }
-void Value::ValueData::operator=(ValueData&& other) {
-	u64 = other.u64;
+void Value::Data::operator=(const Data& other) {
+	o = other.o;
 }
-void Value::ValueData::destroy(ValueType type) {
+void Value::Data::operator=(Data&& other) {
+	o = other.o;
+	other.o = nullptr;
+}
+void Value::Data::destroy(Type type) {
 	switch (type) {
-	case json::kString:
+	case Type::kString:
 		delete s;
 		break;
-	case json::kArray:
+	case Type::kArray:
 		delete a;
 		break;
-	case json::kObject:
+	case Type::kObject:
 		delete o;
 		break;
 	}
 }
 
-Value::Value() : data_(), type_(kNull) {}
-Value::Value(nullptr_t) : data_(), type_(kNull) {}
-Value::Value(bool value) : data_(value), type_(kBoolean) {}
-Value::Value(Int value) : data_(value), type_(kInteger) {}
-Value::Value(UInt value) : data_(value), type_(kUInteger) {}
-Value::Value(Int64 value) : data_(value), type_(kInteger) {}
-Value::Value(UInt64 value) : data_(value), type_(kUInteger) {}
-Value::Value(Float value) : data_(value), type_(kReal) {}
-Value::Value(Double value) : data_(value), type_(kReal) {}
-Value::Value(StringView value) : data_(value), type_(kString) {}
-Value::Value(ValueType type) : data_(type), type_(type) {};
-Value::Value(const Value& other) :data_(other.data_, other.type_), type_(other.type_) {};
-Value::Value(Value&& other)noexcept :data_(move(other.data_)), type_(other.type_) {
-	other.type_ = kNull;
-	other.data_.u64 = 0;
+Value::Value() : data_(), type_(Type::kNull) {}
+Value::Value(nullptr_t) : data_(), type_(Type::kNull) {}
+Value::Value(bool value) : data_(value), type_(Type::kBoolean) {}
+Value::Value(int value) : data_(value), type_(Type::kNumber) {}
+Value::Value(unsigned value) : data_(value), type_(Type::kNumber) {}
+Value::Value(int64_t value) : data_(value), type_(Type::kNumber) {}
+Value::Value(uint64_t value) : data_(value), type_(Type::kNumber) {}
+Value::Value(double value) : data_(value), type_(Type::kNumber) {}
+Value::Value(const char* value) : data_(value), type_(Type::kString) {}
+Value::Value(const std::string& value) : data_(value), type_(Type::kString) {}
+Value::Value(const Type type) : data_(type), type_(type) {}
+Value::Value(const Value& other) : type_(other.type_) {
+	switch (other.type_) {
+	case Type::kString:
+		data_ = *other.data_.s;
+		break;
+	case Type::kArray:
+		data_ = *other.data_.a;
+		break;
+	case Type::kObject:
+		data_ = *other.data_.o;
+		break;
+	default:
+		data_ = other.data_;
+		break;
+	}
+};
+Value::Value(Value&& other)noexcept :
+	data_(std::move(other.data_)), type_(other.type_) {
+	other = Type::kNull;
 };
 Value::~Value() {
 	data_.destroy(type_);
-	type_ = kNull;
+	type_ = Type::kNull;
 }
 Value& Value::operator=(const Value& other) {
 	return operator=(Value(other));
@@ -656,71 +625,86 @@ bool Value::equal(const Value& other)const {
 	if (type_ != other.type_)
 		return false;
 	switch (type_) {
-	case kNull:
+	case Type::kNull:
 		return true;
-	case kBoolean:
+	case Type::kBoolean:
 		return data_.b == other.data_.b;
-	case kInteger:
-		return data_.i64 == other.data_.i64;
-	case kUInteger:
-		return data_.u64 == other.data_.u64;
-	case kReal:
-		return data_.d == other.data_.d;
-	case kString:
+	case Type::kNumber:
+		return data_.n == other.data_.n;
+	case Type::kString:
 		return *data_.s == *other.data_.s;
-	case kArray:
+	case Type::kArray:
 		return *data_.a == *other.data_.a;
-	case kObject:
+	case Type::kObject:
 		return *data_.o == *other.data_.o;
 	default:
-		break;
+		return false;
 	}
-	return false;
 }
 bool Value::operator==(const Value& other)const {
 	return equal(other);
 }
-Value& Value::operator[](const String& index) {
-	JSON_ASSERT(isObject() || isNull());
+Value& Value::operator[](const std::string& index) {
+	JSON_ASSERT(isObject() || isNull(), "Value must be object or null");
 	if (isNull())
-		*this = kObject;
+		*this = Type::kObject;
 	return data_.o->operator[](index);
 }
 Value& Value::operator[](size_t index) {
-	JSON_ASSERT(isArray() || isNull());
+	JSON_ASSERT(isArray() || isNull(), "Value must be array or null");
 	if (isNull())
-		*this = kArray;
-	auto begin = data_.a->begin();
-	while (begin != data_.a->end()) {
-		--index;
-		if (!index) {
-			return *begin;
-		}
-		++begin;
-	}
+		*this = Type::kArray;
+	if (data_.a->size() < index)
+		Fatal("index out of range");
 	return data_.a->operator[](index);
 }
-void Value::insert(const String& index, Value&& value) {
-	JSON_ASSERT(isObject() || isNull());
+void Value::insert(const std::string& index, Value&& value) {
+	JSON_ASSERT(isObject() || isNull(), "Value must be object or null");
 	if (isNull())
-		*this = kObject;
+		*this = Type::kObject;
 	data_.o->emplace(index, value);
 }
-bool Value::asBool()const { JSON_ASSERT(isBool()); return data_.b; }
-Int Value::asInt()const { JSON_ASSERT(isNumber()); return data_.i; }
-UInt Value::asUInt()const { JSON_ASSERT(isNumber()); return data_.u; }
-Int64 Value::asInt64()const { JSON_ASSERT(isNumber()); return data_.i64; }
-UInt64 Value::asUInt64()const { JSON_ASSERT(isNumber()); return data_.u64; }
-Float Value::asFloat()const { JSON_ASSERT(isNumber()); return data_.f; }
-Double Value::asDouble()const { JSON_ASSERT(isNumber()); return data_.d; }
-String Value::asString()const { JSON_ASSERT(isString());	return *data_.s; }
-Array Value::asArray()const { JSON_ASSERT(isArray()); return *data_.a; }
-Object Value::asObject()const { JSON_ASSERT(isObject()); return *data_.o; }
+bool Value::asBool()const {
+	JSON_ASSERT(isBool(), "Value must be bool");
+	return data_.b;
+}
+int Value::asInt()const {
+	JSON_ASSERT(isNumber(), "Value must be number");
+	return static_cast<int>(data_.n);
+}
+unsigned Value::asUInt()const {
+	JSON_ASSERT(isNumber(), "Value must be number");
+	return static_cast<unsigned>(data_.n);
+}
+int64_t Value::asInt64()const {
+	JSON_ASSERT(isNumber(), "Value must be number");
+	return static_cast<int64_t>(data_.n);
+}
+uint64_t Value::asUInt64()const {
+	JSON_ASSERT(isNumber(), "Value must be number");
+	return static_cast<uint64_t>(data_.n);
+}
+double Value::asDouble()const {
+	JSON_ASSERT(isNumber(), "Value must be number");
+	return data_.n;
+}
+const std::string& Value::asString()const {
+	JSON_ASSERT(isString(), "Value must be number");
+	return *data_.s;
+}
+const Array& Value::asArray()const {
+	JSON_ASSERT(isArray(), "Value must be array");
+	return *data_.a;
+}
+const Object& Value::asObject()const {
+	JSON_ASSERT(isObject(), "Value must be object");
+	return *data_.o;
+}
 void Value::swap(Value& other) {
 	std::swap(data_, other.data_);
 	std::swap(type_, other.type_);
 }
-bool Value::remove(const String& index) {
+bool Value::remove(const std::string& index) {
 	if (isObject()) {
 		data_.o->erase(index);
 		return true;
@@ -738,106 +722,63 @@ void Value::append(const Value& value) {
 	append(Value(value));
 }
 void Value::append(Value&& value) {
-	JSON_ASSERT(isArray() || isNull());
+	JSON_ASSERT(isArray() || isNull(), "Value must be array or null");
 	if (isNull())
-		*this = kArray;
-	data_.a->push_back(move(value));
+		*this = Type::kArray;
+	data_.a->push_back(std::move(value));
 }
 size_t Value::size()const {
 	switch (type_) {
-	case kNull:
-		return 0;
-	case kBoolean:
-		break;
-	case kInteger:
-		break;
-	case kUInteger:
-		break;
-	case kReal:
-		break;
-	case kString:
+	case Type::kString:
 		return data_.s->size();
-	case kArray:
+	case Type::kArray:
 		return data_.a->size();
-	case kObject:
+	case Type::kObject:
 		return data_.o->size();
 	default:
 		break;
 	}
-	return 1;
+	return 0;
 }
 bool Value::empty()const {
 	switch (type_) {
-	case kNull:
+	case Type::kNull:
 		return true;
-	case kBoolean:
-		break;
-	case kInteger:
-		break;
-	case kUInteger:
-		break;
-	case kReal:
-		break;
-	case kString:
+	case Type::kString:
 		return data_.s->empty();
-	case kArray:
+	case Type::kArray:
 		return data_.a->empty();
-	case kObject:
+	case Type::kObject:
 		return data_.o->empty();
 	default:
 		break;
 	}
 	return false;
 }
-bool Value::contains(const String& key)const {
+bool Value::contains(const std::string& key)const {
 	if (isObject())
 		return data_.o->find(key) != data_.o->end();
 	return false;
 }
 void Value::clear() {
 	switch (type_) {
-	case kNull:
-		break;
-	case kBoolean:
-		break;
-	case kInteger:
-		break;
-	case kUInteger:
-		break;
-	case kReal:
-		break;
-	case kString:
+	case Type::kString:
 		data_.s->clear();
 		break;
-	case kArray:
+	case Type::kArray:
 		data_.a->clear();
 		break;
-	case kObject:
+	case Type::kObject:
 		data_.o->clear();
 		break;
 	default:
 		break;
 	}
-	type_ = kNull;
+	type_ = Type::kNull;
 }
-String Value::dump(UInt indent_count, bool emit_utf8)const {
-	Writer w(indent_count, emit_utf8);
-	if (indent_count > 0)
-		w.writePrettyValue(*this);
-	else
-		w.writeValue(*this);
+std::string Value::dump()const {
+	Writer w;
+	w.writePrettyValue(*this);
 	return w.getOutput();
-}
-std::ostream& operator<<(std::ostream& os, const Value& value) {
-	return os << value.dump();
-}
-Value Parse(StringView str, String* err, bool allow_comments) {
-	Value value;
-	Value::Parser parser;
-	bool success = parser.parse(str, value, allow_comments);
-	if (err && !success) {
-		*err = parser.getError();
-	}
-	return value;
 }
 } // namespace Json
