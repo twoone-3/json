@@ -2,7 +2,7 @@
 Author:
 	twoone3
 Last change:
-	2021.9.21
+	2021.10.22
 Github:
 	https://github.com/twoone-3/json
 Reference:
@@ -25,12 +25,13 @@ Readme:
 #endif
 
 #if CXX_STANDARD < 201703L
-#error json.h require std::c++17 <charconv> <string_view>
+#error json.h require std::c++17
 #endif
 
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 #include <map>
 
@@ -40,23 +41,32 @@ class Value;
 
 using Array = std::vector<Value>;
 using Object = std::map<std::string, Value>;
+using Data = std::variant<
+	nullptr_t,
+	bool,
+	double,
+	std::string,
+	Array,
+	Object
+>;
 
 //Type of the value held by a Value object.
 enum class Type :uint8_t {
 	kNull,		//null value
-	kBoolean,	//bool value
-	kNumber,	//number value
-	kString,	//UTF-8 string value
-	kArray,		//array value (ordered list)
-	kObject		//object value (collection of name/value pairs).
+	kBoolean,	//boolean value (bool)
+	kNumber,	//number value (double)
+	kString,	//UTF-8 string value (std::string)
+	kArray,		//array value (Array)
+	kObject		//object value (Object)
 };
-//JSON Parser
-class Parser {
+//JSON Reader
+class Reader {
 public:
-	Parser();
-	Parser& allowComments();
+	Reader();
+	Reader& allowComments();
 	bool parse(std::string_view, Value&);
-	std::string getError();
+	bool parseFile(std::string_view, Value&);
+	std::string getError()const;
 private:
 	bool parseValue(Value&);
 	bool parseNull(Value&);
@@ -86,6 +96,7 @@ public:
 	void writeValue(const Value&);
 	const std::string& getOutput()const;
 private:
+	void writeHex16Bit(unsigned);
 	void writeIndent();
 	void writeNull();
 	void writeBoolean(const Value&);
@@ -102,67 +113,44 @@ private:
 };
 //JSON Value, can be one of the Type
 class Value {
-	friend class Parser;
+	friend class Reader;
 	friend class Writer;
 public:
-	//UNION Data
-	union Data {
-		bool b;
-		double n;
-		std::string* s;
-		Array* a;
-		Object* o;
-
-		Data();
-		Data(bool);
-		Data(int);
-		Data(unsigned);
-		Data(int64_t);
-		Data(uint64_t);
-		Data(double);
-		Data(const char*);
-		Data(const std::string&);
-		Data(const Array&);
-		Data(const Object&);
-		Data(const Type);
-		Data(const Data&);
-		Data(Data&&);
-		void operator=(const Data&);
-		void operator=(Data&&);
-		void destroy(Type);
-		~Data() = default;
-	};
 	Value();
 	Value(nullptr_t);
 	Value(bool);
-	Value(int);
-	Value(unsigned);
-	Value(int64_t);
-	Value(uint64_t);
 	Value(double);
 	Value(const char*);
 	Value(const std::string&);
-	Value(Type);
 	Value(const Value&);
 	Value(Value&&)noexcept;
 	~Value();
 	Value& operator=(const Value&);
 	Value& operator=(Value&&)noexcept;
-	bool equal(const Value&)const;
 	bool operator==(const Value&)const;
 	Value& operator[](size_t);
 	Value& operator[](const std::string&);
 	void insert(const std::string&, Value&&);
 
-	bool asBool()const;
-	int asInt()const;
-	unsigned asUInt()const;
-	int64_t asInt64()const;
-	uint64_t asUInt64()const;
-	double asDouble()const;
-	const std::string& asString()const;
-	const Array& asArray()const;
-	const Object& asObject()const;
+	constexpr bool& asBool() { return std::get<bool>(data_); };
+	//constexpr int& asInt() { return std::get<int>(data_); };
+	//constexpr unsigned& asUInt() { return std::get<unsigned>(data_); };
+	//constexpr int64_t& asInt64() { return std::get<int64_t>(data_); };
+	//constexpr uint64_t& asUInt64() { return std::get<uint64_t>(data_); };
+	constexpr double& asNumber() { return std::get<double>(data_); };
+	constexpr std::string& asString() { return std::get<std::string>(data_); };
+	constexpr Array& asArray() { return std::get<Array>(data_); };
+	constexpr Object& asObject() { return std::get<Object>(data_); };
+
+	constexpr const bool& asBool()const { return std::get<bool>(data_); };
+	//constexpr const int& asInt()const { return std::get<int>(data_); };
+	//constexpr const unsigned& asUInt()const { return std::get<unsigned>(data_); };
+	//constexpr const int64_t& asInt64()const { return std::get<int64_t>(data_); };
+	//constexpr const uint64_t& asUInt64()const { return std::get<uint64_t>(data_); };
+	constexpr const double& asNumber()const { return std::get<double>(data_); };
+	constexpr const std::string& asString()const { return std::get<std::string>(data_); };
+	constexpr const Array& asArray()const { return std::get<Array>(data_); };
+	constexpr const Object& asObject()const { return std::get<Object>(data_); };
 	//Exchange data from other Value
 	void swap(Value&);
 	//Remove a key-value pair from object
@@ -183,19 +171,18 @@ public:
 	//Generate a beautiful string
 	std::string dump()const;
 	//Get type
-	Type type()const { return type_; }
-	bool isNull()const { return type_ == Type::kNull; }
-	bool isBool()const { return type_ == Type::kBoolean; }
-	bool isNumber()const { return type_ == Type::kNumber; }
-	bool isString()const { return type_ == Type::kString; }
-	bool isArray()const { return type_ == Type::kArray; }
-	bool isObject()const { return type_ == Type::kObject; }
+	constexpr Type type()const { return static_cast<Type>(data_.index()); }
+	bool isNull()const { return type() == Type::kNull; }
+	bool isBool()const { return type() == Type::kBoolean; }
+	bool isNumber()const { return type() == Type::kNumber; }
+	bool isString()const { return type() == Type::kString; }
+	bool isArray()const { return type() == Type::kArray; }
+	bool isObject()const { return type() == Type::kObject; }
 private:
 	Data data_;
-	Type type_;
 };
 //Print the value
 inline std::ostream& operator<<(std::ostream& os, const Value& value) {
 	return os << value.dump();
 }
-}// namespace Json
+}// namespace json
