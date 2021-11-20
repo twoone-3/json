@@ -2,7 +2,7 @@
 Author:
 	twoone3
 Last change:
-	2021.10.22
+	2021.11.20
 Github:
 	https://github.com/twoone-3/json
 Reference:
@@ -11,7 +11,6 @@ Reference:
 Readme:
 	This library can quickly parse or generate JSON.
 	We use Dom to store JSON data, Value is the only class, and all interfaces are in the Value class.
-
 */
 #pragma once
 
@@ -19,12 +18,12 @@ Readme:
 #define JSON_INDENT "    "
 
 #if defined(__clang__) || defined(__GNUC__)
-#define CXX_STANDARD __cplusplus
+#define CPP_STANDARD __cplusplus
 #elif defined(_MSC_VER)
-#define CXX_STANDARD _MSVC_LANG
+#define CPP_STANDARD _MSVC_LANG
 #endif
 
-#if CXX_STANDARD < 201703L
+#if CPP_STANDARD < 201703L
 #error json.h require std::c++17
 #endif
 
@@ -92,7 +91,7 @@ class Writer {
 public:
 	Writer();
 	Writer& emit_utf8();
-	void writePrettyValue(const Value&);
+	void writeValueFormatted(const Value&);
 	void writeValue(const Value&);
 	const std::string& getOutput()const;
 private:
@@ -104,14 +103,14 @@ private:
 	void writeString(std::string_view);
 	void writeArray(const Value&);
 	void writeObject(const Value&);
-	void writePrettyArray(const Value&);
-	void writePrettyObject(const Value&);
+	void writeArrayFormatted(const Value&);
+	void writeObjectFormatted(const Value&);
 
 	std::string out_;
 	unsigned depth_of_indentation_;
 	bool emit_utf8_;
 };
-//JSON Value, can be one of the Type
+//JSON Value, can be one of enum Type
 class Value {
 	friend class Reader;
 	friend class Writer;

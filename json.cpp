@@ -11,8 +11,9 @@ static void Fatal(const char* msg) {
 	exit(-1);
 }
 static void CodePointToUTF8(std::string& s, unsigned u) {
-	if (u <= 0x7F)
+	if (u <= 0x7F) {
 		s += static_cast<char>(u & 0xFF);
+	}
 	else if (u <= 0x7FF) {
 		s += static_cast<char>(0xC0 | (0xFF & (u >> 6)));
 		s += static_cast<char>(0x80 | (0x3F & u));
@@ -99,19 +100,10 @@ bool Reader::parse(std::string_view str, Value& value) {
 		cur_ += 3;
 	// skip whitespace
 	JSON_SKIP_WHITE_SPACE;
-	JSON_CHECK_OUT_OF_RANGE;
 	bool result = parseValue(value);
-	if (!result) {
+	if (!result)
 		value = nullptr;
-		return result;
-	}
-	if (cur_ == end_)
-		return true;
-	JSON_SKIP_WHITE_SPACE;
-	if (cur_ == end_)
-		return true;
-	value = nullptr;
-	return error("extra character");
+	return result;
 }
 bool Reader::parseFile(std::string_view filename, Value& value) {
 	FILE* f = nullptr;
@@ -129,7 +121,7 @@ bool Reader::parseFile(std::string_view filename, Value& value) {
 std::string Reader::getError()const {
 	std::string err(err_);
 	err += " in line ";
-	size_t line = 1;
+	unsigned line = 1;
 	// count the number of rows from begin_ to cur_
 	for (const char* cur = begin_; cur != cur_; ++cur) {
 		if (*cur == '\n')
@@ -374,14 +366,14 @@ Writer& Writer::emit_utf8() {
 	emit_utf8_ = true;
 	return *this;
 }
-void Writer::writePrettyValue(const Value& value) {
+void Writer::writeValueFormatted(const Value& value) {
 	switch (value.type()) {
 	case Type::kNull:return writeNull();
 	case Type::kBoolean:return writeBoolean(value);
 	case Type::kNumber:return writeNumber(value);
 	case Type::kString:return writeString(value.asString());
-	case Type::kArray:return writePrettyArray(value);
-	case Type::kObject:return writePrettyObject(value);
+	case Type::kArray:return writeArrayFormatted(value);
+	case Type::kObject:return writeObjectFormatted(value);
 	}
 }
 void Writer::writeValue(const Value& value) {
@@ -514,14 +506,14 @@ void Writer::writeObject(const Value& value) {
 	}
 	out_ += '}';
 }
-void Writer::writePrettyArray(const Value& value) {
+void Writer::writeArrayFormatted(const Value& value) {
 	out_ += '[';
 	if (!value.asArray().empty()) {
 		out_ += '\n';
 		++depth_of_indentation_;
 		for (auto& val : value.asArray()) {
 			writeIndent();
-			writePrettyValue(val);
+			writeValueFormatted(val);
 			out_ += ",\n";
 		}
 		--depth_of_indentation_;
@@ -532,7 +524,7 @@ void Writer::writePrettyArray(const Value& value) {
 	}
 	out_ += ']';
 }
-void Writer::writePrettyObject(const Value& value) {
+void Writer::writeObjectFormatted(const Value& value) {
 	out_ += '{';
 	if (!value.asObject().empty()) {
 		out_ += '\n';
@@ -541,7 +533,7 @@ void Writer::writePrettyObject(const Value& value) {
 			writeIndent();
 			writeString(key);
 			out_ += ": ";
-			writePrettyValue(val);
+			writeValueFormatted(val);
 			out_ += ",\n";
 		}
 		--depth_of_indentation_;
@@ -658,7 +650,7 @@ void Value::append(const Value& value) {
 void Value::append(Value&& value) {
 	JSON_ASSERT(isArray() || isNull(), "Value must be array or null");
 	if (isNull())
-		data_= Array();
+		data_ = Array();
 	asArray().push_back(std::move(value));
 }
 size_t Value::size()const {
@@ -712,7 +704,7 @@ void Value::clear() {
 }
 std::string Value::dump()const {
 	Writer w;
-	w.writePrettyValue(*this);
+	w.writeValueFormatted(*this);
 	return w.getOutput();
 }
 } // namespace Json

@@ -86,7 +86,7 @@ static void init() {
 
 	auto end = system_clock::now();
 	auto duration = duration_cast<milliseconds>(end - start);
-	cout << "Cost" << duration.count() << "ms" << endl;
+	cout << "Cost " << duration.count() << "ms" << endl;
 }
 int main() {
 	system("chcp 65001");
