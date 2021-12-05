@@ -2,7 +2,7 @@
 Author:
 	twoone3
 Last change:
-	2021.11.20
+	2021.12.5
 Github:
 	https://github.com/twoone-3/json
 Reference:
@@ -48,7 +48,6 @@ using Data = std::variant<
 	Array,
 	Object
 >;
-
 //Type of the value held by a Value object.
 enum class Type :uint8_t {
 	kNull,		//null value
