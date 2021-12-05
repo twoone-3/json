@@ -15,7 +15,7 @@ Readme:
 #pragma once
 
 // Content of indentation, tab or four spaces is recommended.
-#define JSON_INDENT "    "
+constexpr auto JSON_INDENT = "    ";
 
 #if defined(__clang__) || defined(__GNUC__)
 #define CPP_STANDARD __cplusplus
