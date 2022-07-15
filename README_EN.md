@@ -10,3 +10,4 @@ Convenient c++JSON library<br>
 # Reference
 https://github.com/jo-qzy/MyJson/
 https://github.com/open-source-parsers/jsoncpp
+https://github.com/nlohmann/json

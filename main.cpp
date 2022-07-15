@@ -1,4 +1,5 @@
 #pragma execution_character_set("utf-8")
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
@@ -8,7 +9,7 @@ using namespace std;
 using namespace json;
 
 static constexpr auto testjson =
-R"(
+	R"(
 [
     "JSON Test Pattern pass1",
     {"object with 1 member":["array with 1 element"]},
@@ -74,14 +75,15 @@ static void init() {
 
 	for (auto& x : directory_iterator("test")) {
 		cout << "Test file: " << x << endl;
-		//cout << "Source file:\n" << s << endl;
+		// cout << "Source file:\n" << s << endl;
 		Reader p;
 		Value v;
-		//if (!p.parseFile(testjson, v))
+		// if (!p.parse(testjson, v))
 		//	cout << p.getError() << endl;
 		if (!p.parseFile(x.path().string(), v))
 			cout << p.getError() << endl;
-		cout << "After parse:\n" << v << "\n\n";
+		cout << "After parse:\n"
+			 << v.dump() << "\n\n";
 	}
 
 	auto end = system_clock::now();

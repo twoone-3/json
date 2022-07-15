@@ -1,15 +1,19 @@
 ﻿#include "json.h"
 #include <charconv>
 
+// clang-format off
 #define JSON_SKIP_WHITE_SPACE if(!skipWhiteSpace())return false
 #define JSON_CHECK_OUT_OF_RANGE if (cur_ == end_)return error("unexpected ending character")
 #define JSON_ASSERT(expr,msg) if (!(expr))Fatal(msg)
+// clang-format on
 
 namespace json {
+
 static void Fatal(const char* msg) {
-	std::cerr << msg << std::endl;
+	perror(msg);
 	exit(-1);
 }
+
 static void CodePointToUTF8(std::string& s, unsigned u) {
 	if (u <= 0x7F) {
 		s += static_cast<char>(u & 0xFF);
@@ -30,10 +34,11 @@ static void CodePointToUTF8(std::string& s, unsigned u) {
 		s += static_cast<char>(0x80 | (0x3F & u));
 	}
 }
+
 static unsigned UTF8ToCodepoint(const char*& cur, const char* end) {
 	constexpr unsigned REPLACEMENT_CHARACTER = 0xFFFD;
 
-	unsigned firstByte = static_cast<unsigned char>(*cur);
+	unsigned firstByte = static_cast<uint8_t>(*cur);
 
 	if (firstByte < 0x80)
 		return firstByte;
@@ -54,8 +59,8 @@ static unsigned UTF8ToCodepoint(const char*& cur, const char* end) {
 			return REPLACEMENT_CHARACTER;
 
 		unsigned calculated = ((firstByte & 0x0F) << 12) |
-			((static_cast<unsigned>(cur[1]) & 0x3F) << 6) |
-			(static_cast<unsigned>(cur[2]) & 0x3F);
+							  ((static_cast<unsigned>(cur[1]) & 0x3F) << 6) |
+							  (static_cast<unsigned>(cur[2]) & 0x3F);
 		cur += 2;
 		// surrogates aren't valid codepoints itself
 		// shouldn't be UTF-8 encoded
@@ -70,9 +75,9 @@ static unsigned UTF8ToCodepoint(const char*& cur, const char* end) {
 			return REPLACEMENT_CHARACTER;
 
 		unsigned calculated = ((firstByte & 0x07) << 18) |
-			((static_cast<unsigned>(cur[1]) & 0x3F) << 12) |
-			((static_cast<unsigned>(cur[2]) & 0x3F) << 6) |
-			(static_cast<unsigned>(cur[3]) & 0x3F);
+							  ((static_cast<unsigned>(cur[1]) & 0x3F) << 12) |
+							  ((static_cast<unsigned>(cur[2]) & 0x3F) << 6) |
+							  (static_cast<unsigned>(cur[3]) & 0x3F);
 		cur += 3;
 		// oversized encoded characters are invalid
 		return calculated < 0x10000 ? REPLACEMENT_CHARACTER : calculated;
@@ -81,14 +86,29 @@ static unsigned UTF8ToCodepoint(const char*& cur, const char* end) {
 	return REPLACEMENT_CHARACTER;
 }
 
-Reader::Reader() :
-	cur_(nullptr), begin_(nullptr), end_(nullptr), err_(nullptr),
-	allow_comments_(false) {
+static char* ReadFile(const char* path) {
+	FILE* pfile = fopen(path, "rb");
+	if (pfile == nullptr)
+		return nullptr;
+	fseek(pfile, 0, SEEK_END);
+	size_t length = ftell(pfile);
+	char* data = (char*)malloc((length + 1) * sizeof(char));
+	rewind(pfile);
+	if (data == nullptr)
+		return nullptr;
+	length = fread(data, 1, length, pfile);
+	data[length] = '\0';
+	fclose(pfile);
+	return data;
 }
+
+Reader::Reader() : cur_(nullptr), begin_(nullptr), end_(nullptr), err_(nullptr), allow_comments_(false) {}
+
 Reader& Reader::allowComments() {
 	allow_comments_ = true;
 	return *this;
 }
+
 bool Reader::parse(std::string_view str, Value& value) {
 	cur_ = str.data();
 	begin_ = str.data();
@@ -105,20 +125,17 @@ bool Reader::parse(std::string_view str, Value& value) {
 		value = nullptr;
 	return result;
 }
+
 bool Reader::parseFile(std::string_view filename, Value& value) {
-	FILE* f = nullptr;
-	fopen_s(&f, filename.data(), "rb");
-	fseek(f, 0, SEEK_END);
-	long size = ftell(f);
-	char* text = new char[size + 1];
-	rewind(f);
-	fread(text, sizeof(char), size, f);
-	text[size] = '\0';
-	bool result = parse(std::string_view(text, size), value);
-	delete[] text;
+	char* content = ReadFile(filename.data());
+	if (content == nullptr)
+		return false;
+	bool result = parse(content, value);
+	free(content);
 	return result;
 }
-std::string Reader::getError()const {
+
+std::string Reader::getError() const {
 	std::string err(err_);
 	err += " in line ";
 	unsigned line = 1;
@@ -127,22 +144,31 @@ std::string Reader::getError()const {
 		if (*cur == '\n')
 			++line;
 	}
-	char buffer[21]{ 0 };
+	char buffer[21]{0};
 	std::to_chars(buffer, buffer + sizeof buffer, line);
 	err += buffer;
 	return err;
 }
+
 bool Reader::parseValue(Value& value) {
 	switch (*cur_) {
-	case 'n':return parseNull(value);
-	case 't':return parseTrue(value);
-	case 'f':return parseFalse(value);
-	case '[':return parseArray(value);
-	case '{':return parseObject(value);
-	case '"':return parseString(value);
-	default:return parseNumber(value);
+	case 'n':
+		return parseNull(value);
+	case 't':
+		return parseTrue(value);
+	case 'f':
+		return parseFalse(value);
+	case '[':
+		return parseArray(value);
+	case '{':
+		return parseObject(value);
+	case '"':
+		return parseString(value);
+	default:
+		return parseNumber(value);
 	}
 }
+
 bool Reader::parseNull(Value& value) {
 	if (cur_[1] == 'u' && cur_[2] == 'l' && cur_[3] == 'l') {
 		cur_ += 4;
@@ -151,6 +177,7 @@ bool Reader::parseNull(Value& value) {
 	}
 	return error("Missing 'null'");
 }
+
 bool Reader::parseTrue(Value& value) {
 	if (cur_[1] == 'r' && cur_[2] == 'u' && cur_[3] == 'e') {
 		cur_ += 4;
@@ -159,6 +186,7 @@ bool Reader::parseTrue(Value& value) {
 	}
 	return error("Missing 'true'");
 }
+
 bool Reader::parseFalse(Value& value) {
 	if (cur_[1] == 'a' && cur_[2] == 'l' && cur_[3] == 's' && cur_[4] == 'e') {
 		cur_ += 5;
@@ -167,10 +195,15 @@ bool Reader::parseFalse(Value& value) {
 	}
 	return error("Missing 'false'");
 }
+
 bool Reader::parseString(Value& value) {
-	value = std::string();
-	return parseString(value.asString());
+	std::string str;
+	bool result = parseString(str);
+	if (result)
+		value = str;
+	return result;
 }
+
 bool Reader::parseString(std::string& s) {
 	while (true) {
 		// "xxxx"
@@ -184,14 +217,30 @@ bool Reader::parseString(std::string& s) {
 			return true;
 		case '\\':
 			switch (*++cur_) {
-			case '"': s += '"'; break;
-			case 'n': s += '\n'; break;
-			case 'r': s += '\r'; break;
-			case 't': s += '\t'; break;
-			case 'f': s += '\f'; break;
-			case 'b': s += '\b'; break;
-			case '/': s += '/'; break;
-			case '\\': s += '\\'; break;
+			case '"':
+				s += '"';
+				break;
+			case 'n':
+				s += '\n';
+				break;
+			case 'r':
+				s += '\r';
+				break;
+			case 't':
+				s += '\t';
+				break;
+			case 'f':
+				s += '\f';
+				break;
+			case 'b':
+				s += '\b';
+				break;
+			case '/':
+				s += '/';
+				break;
+			case '\\':
+				s += '\\';
+				break;
 			case 'u': {
 				unsigned u = 0;
 				if (!parseHex4(u))
@@ -211,21 +260,22 @@ bool Reader::parseString(std::string& s) {
 						return error("missing surrogate pair");
 				}
 				CodePointToUTF8(s, u);
-			}break;
+			} break;
 			default:
 				return error("invalid escape");
 			}
 			break;
 		default:
-			if (static_cast<unsigned char>(c) < ' ')
+			if (static_cast<uint8_t>(c) < ' ')
 				return error("The ASCII code of the characters in the string must be greater than 32");
 			s += c;
 			break;
 		}
 	}
 }
+
 bool Reader::parseHex4(unsigned& u) {
-	//u = 0;
+	// u = 0;
 	char ch = 0;
 	for (unsigned i = 0; i < 4; ++i) {
 		u <<= 4;
@@ -244,11 +294,12 @@ bool Reader::parseHex4(unsigned& u) {
 	}
 	return true;
 }
+
 bool Reader::parseArray(Value& value) {
 	++cur_;
 	value.data_ = Array();
 	JSON_SKIP_WHITE_SPACE;
-	//empty array
+	// empty array
 	if (*cur_ == ']')
 		return ++cur_, true;
 	while (true) {
@@ -257,7 +308,7 @@ bool Reader::parseArray(Value& value) {
 		if (!parseValue(value.asArray().back()))
 			return false;
 		JSON_SKIP_WHITE_SPACE;
-		char ch = *cur_;
+		const char ch = *cur_;
 		if (ch == ',')
 			++cur_;
 		else if (ch == ']')
@@ -266,11 +317,12 @@ bool Reader::parseArray(Value& value) {
 			return error("missing ',' or ']'");
 	}
 }
+
 bool Reader::parseObject(Value& value) {
 	++cur_;
 	value.data_ = Object();
 	JSON_SKIP_WHITE_SPACE;
-	//empty object
+	// empty object
 	if (*cur_ == '}')
 		return ++cur_, true;
 	while (true) {
@@ -289,7 +341,7 @@ bool Reader::parseObject(Value& value) {
 		if (!parseValue(value.asObject().operator[](key)))
 			return false;
 		JSON_SKIP_WHITE_SPACE;
-		char ch = *cur_;
+		const char ch = *cur_;
 		if (ch == ',')
 			++cur_;
 		else if (ch == '}')
@@ -298,6 +350,7 @@ bool Reader::parseObject(Value& value) {
 			return error("missing ',' or '}'");
 	}
 }
+
 bool Reader::parseNumber(Value& value) {
 	/* Refer to https://www.json.org/img/number.png */
 	const uint8_t c = *cur_;
@@ -311,6 +364,7 @@ bool Reader::parseNumber(Value& value) {
 	value = num;
 	return true;
 }
+
 bool Reader::skipWhiteSpace() {
 	while (true) {
 		switch (*cur_) {
@@ -322,29 +376,9 @@ bool Reader::skipWhiteSpace() {
 		case ' ':
 			break;
 		case '/':
-			// If it is true, it is allowed to parse comments in the style of'//' or'/**/'
-			if (!allow_comments_)
-				return error("comments are not allowed here");
-			++cur_;
-			if (*cur_ == '/') {
-				while (*++cur_ != '\n') {
-					JSON_CHECK_OUT_OF_RANGE;
-				}
-				++cur_;
-				break;
-			}
-			else if (*cur_ == '*') {
-				while (*++cur_ != '*') {
-					JSON_CHECK_OUT_OF_RANGE;
-				}
-				if (*++cur_ == '/') {
-					++cur_;
-					break;
-				}
-			}
-			else {
-				return error("invalied comment style");
-			}
+			if (!skipComment())
+				return false;
+			break;
 		default:
 			return true;
 		}
@@ -353,42 +387,89 @@ bool Reader::skipWhiteSpace() {
 	}
 	return true;
 }
+
+bool Reader::skipComment() {
+	// If it is true, it is allowed to parse comments in the style of'//' or'/**/'
+	if (!allow_comments_)
+		return error("comments are not allowed");
+	++cur_;
+	if (*cur_ == '/') {
+		while (*++cur_ != '\n') {
+			JSON_CHECK_OUT_OF_RANGE;
+		}
+		++cur_;
+		return true;
+	}
+	else if (*cur_ == '*') {
+		while (*++cur_ != '*') {
+			JSON_CHECK_OUT_OF_RANGE;
+		}
+		if (*++cur_ == '/') {
+			++cur_;
+			return true;
+		}
+		return error("missing '*/'");
+	}
+	else {
+		return error("invalied comment style");
+	}
+}
+
 bool Reader::error(const char* err) {
 	err_ = err;
 	return false;
 }
 
-Writer::Writer() :
-	out_(), depth_of_indentation_(0),
-	emit_utf8_(false) {
-}
+Writer::Writer() : out_(), depth_of_indentation_(0), emit_utf8_(false) {}
+
 Writer& Writer::emit_utf8() {
 	emit_utf8_ = true;
 	return *this;
 }
+
+Writer& Writer::indent(std::string_view str) {
+	indent_ = str;
+	return *this;
+}
+
 void Writer::writeValueFormatted(const Value& value) {
 	switch (value.type()) {
-	case Type::kNull:return writeNull();
-	case Type::kBoolean:return writeBoolean(value);
-	case Type::kNumber:return writeNumber(value);
-	case Type::kString:return writeString(value.asString());
-	case Type::kArray:return writeArrayFormatted(value);
-	case Type::kObject:return writeObjectFormatted(value);
+	case Type::kNull:
+		return writeNull();
+	case Type::kBoolean:
+		return writeBoolean(value);
+	case Type::kNumber:
+		return writeNumber(value);
+	case Type::kString:
+		return writeString(value.asString());
+	case Type::kArray:
+		return writeArrayFormatted(value);
+	case Type::kObject:
+		return writeObjectFormatted(value);
 	}
 }
+
 void Writer::writeValue(const Value& value) {
 	switch (value.type()) {
-	case Type::kNull:return writeNull();
-	case Type::kBoolean:return writeBoolean(value);
-	case Type::kNumber:return writeNumber(value);
-	case Type::kString:return writeString(value.asString());
-	case Type::kArray:return writeArray(value);
-	case Type::kObject:return writeObject(value);
+	case Type::kNull:
+		return writeNull();
+	case Type::kBoolean:
+		return writeBoolean(value);
+	case Type::kNumber:
+		return writeNumber(value);
+	case Type::kString:
+		return writeString(value.asString());
+	case Type::kArray:
+		return writeArray(value);
+	case Type::kObject:
+		return writeObject(value);
 	}
 }
-const std::string& Writer::getOutput()const {
+
+const std::string& Writer::getOutput() const {
 	return out_;
 }
+
 void Writer::writeHex16Bit(unsigned u) {
 	constexpr const char hex2[513] =
 		"000102030405060708090a0b0c0d0e0f"
@@ -414,21 +495,26 @@ void Writer::writeHex16Bit(unsigned u) {
 	out_ += hex2[2 * lo];
 	out_ += hex2[2 * lo + 1];
 }
+
 void Writer::writeIndent() {
 	for (unsigned i = depth_of_indentation_; i; --i)
-		out_ += JSON_INDENT;
+		out_ += indent_;
 }
+
 void Writer::writeNull() {
 	out_.append("null", 4);
 }
+
 void Writer::writeBoolean(const Value& value) {
 	value.asBool() ? out_.append("true", 4) : out_.append("false", 5);
 }
+
 void Writer::writeNumber(const Value& value) {
-	char buffer[21]{ 0 };
-	std::to_chars(buffer, buffer + sizeof buffer, value.asNumber());
+	char buffer[21]{0};
+	std::to_chars(buffer, buffer + sizeof buffer, value.asDouble());
 	out_.append(buffer);
 }
+
 void Writer::writeString(std::string_view str) {
 	const char* cur = str.data();
 	const char* end = cur + str.length();
@@ -436,51 +522,69 @@ void Writer::writeString(std::string_view str) {
 	while (cur < end) {
 		char c = *cur;
 		switch (c) {
-		case '"':out_ += "\\\""; break;
-		case '\\':out_ += "\\\\"; break;
-		case '\b':out_ += "\\b"; break;
-		case '\f':out_ += "\\f"; break;
-		case '\n':out_ += "\\n"; break;
-		case '\r':out_ += "\\r"; break;
-		case '\t':out_ += "\\t"; break;
+		case '"':
+			out_ += "\\\"";
+			break;
+		case '\\':
+			out_ += "\\\\";
+			break;
+		case '\b':
+			out_ += "\\b";
+			break;
+		case '\f':
+			out_ += "\\f";
+			break;
+		case '\n':
+			out_ += "\\n";
+			break;
+		case '\r':
+			out_ += "\\r";
+			break;
+		case '\t':
+			out_ += "\\t";
+			break;
 		default:
-			if (emit_utf8_) {
-				if (uint8_t(c) < 0x20) {
-					out_ += "\\u";
-					writeHex16Bit(c);
-				}
-				else {
-					out_ += c;
-				}
-			}
-			else {
-				unsigned codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
-				if (codepoint < 0x20) {
-					out_ += "\\u";
-					writeHex16Bit(codepoint);
-				}
-				else if (codepoint < 0x80) {
-					out_ += static_cast<char>(codepoint);
-				}
-				else if (codepoint < 0x10000) {
-					// Basic Multilingual Plane
-					out_ += "\\u";
-					writeHex16Bit(codepoint);
-				}
-				else {
-					// Extended Unicode. Encode 20 bits as a surrogate pair.
-					codepoint -= 0x10000;
-					out_ += "\\u";
-					writeHex16Bit(0xD800 + ((codepoint >> 10) & 0x3FF));
-					writeHex16Bit(0xDC00 + (codepoint & 0x3FF));
-				}
-				break;
-			}
+			writeChar(cur, end, c);
 		}
 		++cur;
 	}
 	out_ += '"';
 }
+
+void Writer::writeChar(const char*& cur, const char* end, char c) {
+	if (emit_utf8_) {
+		if (uint8_t(c) < 0x20) {
+			out_ += "\\u";
+			writeHex16Bit(c);
+		}
+		else {
+			out_ += c;
+		}
+	}
+	else {
+		unsigned codepoint = UTF8ToCodepoint(cur, end); // modifies `c`
+		if (codepoint < 0x20) {
+			out_ += "\\u";
+			writeHex16Bit(codepoint);
+		}
+		else if (codepoint < 0x80) {
+			out_ += static_cast<char>(codepoint);
+		}
+		else if (codepoint < 0x10000) {
+			// Basic Multilingual Plane
+			out_ += "\\u";
+			writeHex16Bit(codepoint);
+		}
+		else {
+			// Extended Unicode. Encode 20 bits as a surrogate pair.
+			codepoint -= 0x10000;
+			out_ += "\\u";
+			writeHex16Bit(0xD800 + ((codepoint >> 10) & 0x3FF));
+			writeHex16Bit(0xDC00 + (codepoint & 0x3FF));
+		}
+	}
+}
+
 void Writer::writeArray(const Value& value) {
 	out_ += '[';
 	if (!value.asArray().empty()) {
@@ -491,8 +595,8 @@ void Writer::writeArray(const Value& value) {
 		out_.pop_back();
 	}
 	out_ += ']';
-
 }
+
 void Writer::writeObject(const Value& value) {
 	out_ += '{';
 	if (!value.asObject().empty()) {
@@ -506,6 +610,7 @@ void Writer::writeObject(const Value& value) {
 	}
 	out_ += '}';
 }
+
 void Writer::writeArrayFormatted(const Value& value) {
 	out_ += '[';
 	if (!value.asArray().empty()) {
@@ -524,6 +629,7 @@ void Writer::writeArrayFormatted(const Value& value) {
 	}
 	out_ += ']';
 }
+
 void Writer::writeObjectFormatted(const Value& value) {
 	out_ += '{';
 	if (!value.asObject().empty()) {
@@ -545,74 +651,44 @@ void Writer::writeObjectFormatted(const Value& value) {
 	out_ += '}';
 }
 
-Value::Value() :
-	data_(nullptr) {
-}
-Value::Value(nullptr_t) :
-	data_(nullptr) {
-}
-Value::Value(bool value) :
-	data_(value) {
-}
-Value::Value(double value) :
-	data_(value) {
-}
-Value::Value(const char* value) :
-	data_(value) {
-}
-Value::Value(const std::string& value) :
-	data_(value) {
-}
-Value::Value(const Value& other) :
-	data_(other.data_) {
-	//switch (other.type_) {
-	//case Type::kString:
-	//	_setString(*other.data_.s);
-	//	break;
-	//case Type::kArray:
-	//	_setArray(*other.data_.a);
-	//	break;
-	//case Type::kObject:
-	//	_setObject(*other.data_.o);
-	//	break;
-	//default:
-	//	data_ = other.data_;
-	//	break;
-	//}
-};
-Value::Value(Value&& other)noexcept :
-	data_(other.data_) {
-};
-Value::~Value() {
-	//switch (type_) {
-	//case Type::kString:
-	//	delete data_.s;
-	//	break;
-	//case Type::kArray:
-	//	delete data_.a;
-	//	break;
-	//case Type::kObject:
-	//	delete data_.o;
-	//	break;
-	//}
-	//type_ = Type::kNull;
-}
+Value::Value() : data_(nullptr) {}
+
+Value::Value(nullptr_t) : data_(nullptr) {}
+
+Value::Value(bool value) : data_(value) {}
+
+Value::Value(double value) : data_(value) {}
+
+Value::Value(const char* value) : data_(value) {}
+
+Value::Value(const std::string& value) : data_(value) {}
+
+Value::Value(const Value& other) : data_(other.data_){};
+
+Value::Value(Value&& other) noexcept : data_(other.data_){};
+
+Value::~Value() {}
+
 Value& Value::operator=(const Value& other) {
 	return operator=(Value(other));
 };
-Value& Value::operator=(Value&& other)noexcept {
+
+Value& Value::operator=(Value&& other) noexcept {
 	swap(other);
 	return *this;
 };
-bool Value::operator==(const Value& other)const {
+
+bool Value::operator==(const Value& other) const {
 	return data_ == other.data_;
 }
+
 Value& Value::operator[](const std::string& index) {
 	JSON_ASSERT(isObject() || isNull(), "Value must be object or null");
 	if (isNull())
 		data_ = Object();
 	return asObject()[index];
 }
+
 Value& Value::operator[](size_t index) {
 	JSON_ASSERT(isArray() || isNull(), "Value must be array or null");
 	if (isNull())
@@ -621,15 +697,40 @@ Value& Value::operator[](size_t index) {
 		Fatal("index out of range");
 	return asArray()[index];
 }
+
 void Value::insert(const std::string& index, Value&& value) {
 	JSON_ASSERT(isObject() || isNull(), "Value must be object or null");
 	if (isNull())
 		data_ = Object();
 	asObject().emplace(index, value);
 }
+
+bool Value::asBool() const { return std::get<bool>(data_); }
+
+int Value::asInt() const { return static_cast<int>(std::get<double>(data_)); }
+
+unsigned Value::asUInt() const { return static_cast<unsigned>(std::get<double>(data_)); }
+
+int64_t Value::asInt64() const { return static_cast<int64_t>(std::get<double>(data_)); }
+
+uint64_t Value::asUInt64() const { return static_cast<uint64_t>(std::get<double>(data_)); }
+
+double Value::asDouble() const { return std::get<double>(data_); }
+
+std::string Value::asString() const { return std::get<std::string>(data_); }
+
+Array& Value::asArray() { return std::get<Array>(data_); }
+
+const Array& Value::asArray() const { return std::get<Array>(data_); }
+
+Object& Value::asObject() { return std::get<Object>(data_); }
+
+const Object& Value::asObject() const { return std::get<Object>(data_); }
+
 void Value::swap(Value& other) {
 	data_.swap(other.data_);
 }
+
 bool Value::remove(const std::string& index) {
 	if (isObject()) {
 		asObject().erase(index);
@@ -637,6 +738,7 @@ bool Value::remove(const std::string& index) {
 	}
 	return false;
 }
+
 bool Value::remove(size_t index) {
 	if (isArray() && index < size()) {
 		asArray().erase(asArray().begin() + index);
@@ -644,16 +746,19 @@ bool Value::remove(size_t index) {
 	}
 	return false;
 }
+
 void Value::append(const Value& value) {
 	append(Value(value));
 }
+
 void Value::append(Value&& value) {
 	JSON_ASSERT(isArray() || isNull(), "Value must be array or null");
 	if (isNull())
 		data_ = Array();
 	asArray().push_back(std::move(value));
 }
-size_t Value::size()const {
+
+size_t Value::size() const {
 	switch (type()) {
 	case Type::kString:
 		return asString().size();
@@ -666,7 +771,8 @@ size_t Value::size()const {
 	}
 	return 0;
 }
-bool Value::empty()const {
+
+bool Value::empty() const {
 	switch (type()) {
 	case Type::kNull:
 		return true;
@@ -681,11 +787,13 @@ bool Value::empty()const {
 	}
 	return false;
 }
-bool Value::contains(const std::string& key)const {
+
+bool Value::contains(const std::string& key) const {
 	if (isObject())
 		return asObject().find(key) != asObject().end();
 	return false;
 }
+
 void Value::clear() {
 	switch (type()) {
 	case Type::kString:
@@ -700,11 +808,32 @@ void Value::clear() {
 	default:
 		break;
 	}
-	//type_ = Type::kNull;
+	// type_ = Type::kNull;
 }
-std::string Value::dump()const {
+
+std::string Value::dump(bool emit_utf8, std::string_view indent) const {
 	Writer w;
+	if (emit_utf8)
+		w.emit_utf8();
+	w.indent(indent);
 	w.writeValueFormatted(*this);
 	return w.getOutput();
 }
+
+// Get type
+
+constexpr Type Value::type() const { return static_cast<Type>(data_.index()); }
+
+bool Value::isNull() const { return type() == Type::kNull; }
+
+bool Value::isBool() const { return type() == Type::kBoolean; }
+
+bool Value::isNumber() const { return type() == Type::kNumber; }
+
+bool Value::isString() const { return type() == Type::kString; }
+
+bool Value::isArray() const { return type() == Type::kArray; }
+
+bool Value::isObject() const { return type() == Type::kObject; }
+
 } // namespace Json
