@@ -1,5 +1,4 @@
-﻿# Json
-[![CodeFactor](https://www.codefactor.io/repository/github/twoone-3/json/badge)](https://www.codefactor.io/repository/github/twoone-3/json)
+﻿# json
 方便的c++JSON库<br>
 [简体中文](README.md) | [English](README_EN.md)
 # 特点
