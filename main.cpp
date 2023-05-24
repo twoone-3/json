@@ -1,15 +1,16 @@
 #pragma execution_character_set("utf-8")
-#include <iostream>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <chrono>
+#include <iostream>
+
 #include "json.h"
 
 using namespace std;
 using namespace json;
 
 static constexpr auto testjson =
-	R"(
+    R"(
 [
     "JSON Test Pattern pass1",
     {"object with 1 member":["array with 1 element"]},
@@ -69,29 +70,27 @@ static constexpr auto testjson =
 1e00,2e+00,2e-00
 ,"rosebud"])";
 static void init() {
-	using namespace filesystem;
-	using namespace std::chrono;
-	auto start = system_clock::now();
+  using namespace filesystem;
+  using namespace std::chrono;
+  auto start = system_clock::now();
 
-	for (auto& x : directory_iterator("test")) {
-		cout << "Test file: " << x << endl;
-		// cout << "Source file:\n" << s << endl;
-		Reader p;
-		Value v;
-		// if (!p.parse(testjson, v))
-		//	cout << p.getError() << endl;
-		if (!p.parseFile(x.path().string(), v))
-			cout << p.getError() << endl;
-		cout << "After parse:\n"
-			 << v.dump() << "\n\n";
-	}
+  for (auto& x : directory_iterator("test")) {
+    cout << "Test file: " << x << endl;
+    // cout << "Source file:\n" << s << endl;
+    Reader p;
+    Value v;
+    // if (!p.parse(testjson, v))
+    //	cout << p.getError() << endl;
+    if (!p.parseFile(x.path().string(), v)) cout << p.getError() << endl;
+    cout << "After parse:\n" << v.dump() << "\n\n";
+  }
 
-	auto end = system_clock::now();
-	auto duration = duration_cast<milliseconds>(end - start);
-	cout << "Cost " << duration.count() << "ms" << endl;
+  auto end = system_clock::now();
+  auto duration = duration_cast<milliseconds>(end - start);
+  cout << "Cost " << duration.count() << "ms" << endl;
 }
 int main() {
-	system("chcp 65001");
-	init();
-	return 0;
+  system("chcp 65001");
+  init();
+  return 0;
 }
