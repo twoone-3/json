@@ -92,5 +92,16 @@ static void init() {
 int main() {
   system("chcp 65001");
   init();
+  Reader p;
+  Value v;
+
+  bool ok = p.parse("\"\\uD83D\\uDE00\"", v);
+
+  cout << "parse result: " << ok << "\n";
+  if (!ok) {
+    cout << p.getError() << "\n";
+    return 1;
+  }
+  cout << "After parse:\n" << v.dump() << "\n\n";
   return 0;
 }

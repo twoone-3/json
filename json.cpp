@@ -237,17 +237,22 @@ bool Reader::parseString(std::string& s) {
             unsigned u = 0;
             if (!parseHex4(u)) return false;
             if (u >= 0xD800 && u <= 0xDBFF) {
-              // "x\u0123\u0234xx"
+              // High surrogate: must be followed by a low surrogate "\uXXXX".
+              // "x\uD83D\uDE00xx"
               //        ^
-              if (cur_[1] == '\\' && cur_[2] == 'u') {
-                cur_ += 2;
-                unsigned surrogatePair = 0;
-                if (!parseHex4(surrogatePair))
-                  u = 0x10000 + ((u & 0x3FF) << 10) + (surrogatePair & 0x3FF);
-                else
-                  return error("invalid character");
-              } else
+              if (end_ - cur_ < 3 || cur_[1] != '\\' || cur_[2] != 'u')
                 return error("missing surrogate pair");
+              cur_ += 2;
+              if (end_ - cur_ < 4) return error("invalid surrogate pair");
+              unsigned low = 0;
+              // parseHex4 returns true on success; also require a valid low
+              // surrogate range (0xDC00 - 0xDFFF).
+              if (!parseHex4(low) || low < 0xDC00 || low > 0xDFFF)
+                return error("invalid surrogate pair");
+              u = 0x10000 + ((u & 0x3FF) << 10) + (low & 0x3FF);
+            } else if (u >= 0xDC00 && u <= 0xDFFF) {
+              // Lone low surrogate, invalid in JSON.
+              return error("invalid surrogate pair");
             }
             CodePointToUTF8(s, u);
           } break;
@@ -550,6 +555,7 @@ void Writer::writeChar(const char*& cur, const char* end, char c) {
       codepoint -= 0x10000;
       out_ += "\\u";
       writeHex16Bit(0xD800 + ((codepoint >> 10) & 0x3FF));
+      out_ += "\\u";
       writeHex16Bit(0xDC00 + (codepoint & 0x3FF));
     }
   }
