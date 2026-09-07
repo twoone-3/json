@@ -81,7 +81,7 @@ Hand-written recursive descent, single pass, no backtracking:
 
 ## C++ features used
 
-The project builds with C++17 / C++20 (the `x64` configuration sets `stdcpp20`); `json.h` checks the language version at compile time (C++17 or newer). Everything used here is standard ISO C++17:
+The project builds with C++17 (the `x64` configuration sets `stdcpp17`); `json.h` checks the language version at compile time (C++17 or newer). Everything used here is standard ISO C++17:
 
 **Standard library components (C++17)**
 
@@ -155,11 +155,6 @@ int main() {
   return 0;
 }
 ```
-
-## Known limitations
-
-- After parsing the top-level value, `Reader::parse` skips any remaining whitespace/comments and checks that the end of input was reached, so inputs with trailing content such as `"1 2"` are rejected; this check applies to the top level only — trailing whitespace inside arrays/objects is handled by `parseArray`/`parseObject` respectively.
-- The project has only been built and verified with Visual Studio / MSVC (Windows) so far; it has not been tested with other toolchains such as gcc / clang.
 
 ## Reference
 

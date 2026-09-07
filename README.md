@@ -81,7 +81,7 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 
 ## 使用的 C++ 特性
 
-工程配置为 C++17 / C++20（`x64` 配置显式设为 C++20），`json.h` 在编译期检查语言版本（要求 C++17 及以上）。实际使用的特性均为 ISO C++17 标准库 / 语言特性：
+工程配置为 C++17 ，`json.h` 在编译期检查语言版本（要求 C++17 及以上）。实际使用的特性均为 ISO C++17 标准库 / 语言特性：
 
 **标准库组件（C++17）**
 
@@ -156,13 +156,8 @@ int main() {
 }
 ```
 
-## 已知限制
-
-- `Reader::parse` 解析完顶层值后，会跳过剩余空白/注释并检查是否到达输入末尾，因此 `"1 2"` 这类带尾随内容的输入会被拒绝；但该项检查仅针对顶层，数组/对象内部的尾随空白处理由 `parseArray`/`parseObject` 各自负责。
-- 项目目前仅在 Visual Studio / MSVC（Windows）下编译与运行验证，尚未在 gcc / clang 等其他工具链下实测。
-
 ## 参考
 
 - https://github.com/jo-qzy/MyJson/
-- https://github.com/open-source-parsers/jsoncpp（Unicode / UTF-8 相关实现参考）
+- https://github.com/open-source-parsers/jsoncpp （Unicode / UTF-8 相关实现参考）
 - https://github.com/nlohmann/json
