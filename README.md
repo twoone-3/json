@@ -100,7 +100,7 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 - `fail01.json` – `fail33.json`：非法 JSON
 - `fail01_EXCLUDE.json`、`fail18_EXCLUDE.json`：套件标注为"实现相关 / 可选"的样例（顶层为字符串、过深嵌套），目前不作为判定依据
 
-`main.cpp` 会遍历 `test/` 逐个解析并打印输出，同时统计总耗时（毫秒）。注意：**该程序不做断言**——它不会校验"合法样例必须解析成功、非法样例必须解析失败"，也未接入 CI。断言式测试是后续待完善项。
+`main.cpp` 会遍历 `test/` 逐个解析并打印输出，同时统计总耗时（毫秒），并附带一个 `\uD83D\uDE00`（emoji 😃）代理对解析示例。注意：**该程序不做断言**——它不会校验"合法样例必须解析成功、非法样例必须解析失败"，也未接入 CI。断言式测试是后续待完善项。
 
 ## 编译与运行（Visual Studio）
 
@@ -110,7 +110,7 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 2. 在右上角选择配置 `json_test` → `x64` → `Debug`（或 `Release`），点击构建并运行（F5 / Ctrl+F5）；
 3. 程序会在当前工作目录（仓库根目录）下扫描 `test/`，逐个解析并输出结果与总耗时。
 
-工程配置说明：`x64` 配置将语言标准显式设为 C++20（`stdcpp20`）；`Win32` 配置使用 MSVC 默认语言版本；两种配置均可正常编译（要求 C++17 及以上）。
+工程配置说明：`x64` 配置将语言标准设为 C++17（`stdcpp17`）；`Win32` 配置使用 MSVC 默认语言版本；两种配置均可正常编译（要求 C++17 及以上）。
 
 ### 嵌入其他项目
 
@@ -158,8 +158,7 @@ int main() {
 
 ## 已知限制
 
-- `json.cpp` 的 `Reader::parseString` 中，低位代理合并分支的条件判断疑似写反（`if (!parseHex4(surrogatePair))`），合法代理对可能被误判为字符错误；该问题尚未修复，代理对识别能力有待测试验证。
-- `Reader::parse` 解析完顶层值后不检查剩余内容，例如解析 `"1 2"` 会成功并忽略尾随的 `2`。
+- `Reader::parse` 解析完顶层值后，会跳过剩余空白/注释并检查是否到达输入末尾，因此 `"1 2"` 这类带尾随内容的输入会被拒绝；但该项检查仅针对顶层，数组/对象内部的尾随空白处理由 `parseArray`/`parseObject` 各自负责。
 - 项目目前仅在 Visual Studio / MSVC（Windows）下编译与运行验证，尚未在 gcc / clang 等其他工具链下实测。
 
 ## 参考

@@ -116,9 +116,27 @@ bool Reader::parse(std::string_view str, Value& value) {
   if (cur_[0] == 0xEF && cur_[1] == 0xBB && cur_[2] == 0xBF) cur_ += 3;
   // skip whitespace
   JSON_SKIP_WHITE_SPACE;
-  bool result = parseValue(value);
-  if (!result) value = nullptr;
-  return result;
+  if (!parseValue(value)) {
+    value = nullptr;
+    return false;
+  }
+  // After the top-level value, only whitespace (and comments, if enabled) is
+  // allowed; anything else means there is trailing content that was not parsed.
+  while (cur_ != end_) {
+    const char c = *cur_;
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      ++cur_;
+    } else if (c == '/' && allow_comments_) {
+      if (!skipComment()) {
+        value = nullptr;
+        return false;
+      }
+    } else {
+      value = nullptr;
+      return error("unexpected trailing content");
+    }
+  }
+  return true;
 }
 
 bool Reader::parseFile(std::string_view filename, Value& value) {

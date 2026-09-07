@@ -100,7 +100,7 @@ The project builds with C++17 / C++20 (the `x64` configuration sets `stdcpp20`);
 - `fail01.json` – `fail33.json`: invalid JSON
 - `fail01_EXCLUDE.json`, `fail18_EXCLUDE.json`: cases marked "implementation-defined / optional" (a top-level string, an overly deep nesting); not used as pass / fail criteria
 
-`main.cpp` parses every file in `test/` and prints the results plus the total time in milliseconds. Note: **it makes no assertions** — it does not check that valid inputs parse and invalid inputs fail, and there is no CI yet. Assertion-based tests are a TODO.
+`main.cpp` parses every file in `test/` and prints the results plus the total time in milliseconds, and also includes a `\uD83D\uDE00` (emoji 😃) surrogate-pair parsing example. Note: **it makes no assertions** — it does not check that valid inputs parse and invalid inputs fail, and there is no CI yet. Assertion-based tests are a TODO.
 
 ## Build & run (Visual Studio)
 
@@ -110,7 +110,7 @@ No CMake — this project is a Visual Studio solution (`Json.sln` / `json.vcxpro
 2. Select `json_test` → `x64` → `Debug` (or `Release`), then build and run (F5 / Ctrl+F5);
 3. The program scans `test/` under the working directory (the repo root), parses every file and prints the results and the total time.
 
-The `x64` configurations set the language standard to C++20 (`stdcpp20`); the `Win32` configurations use the MSVC default. Both require C++17 or newer.
+The `x64` configurations set the language standard to C++17 (`stdcpp17`); the `Win32` configurations use the MSVC default. Both require C++17 or newer.
 
 ### Using it in your own project
 
@@ -158,8 +158,7 @@ int main() {
 
 ## Known limitations
 
-- In `json.cpp`, the low-surrogate merge branch of `Reader::parseString` has a suspected inverted condition (`if (!parseHex4(surrogatePair))`), so a valid surrogate pair may currently be rejected as an invalid character; this has not been fixed and surrogate-pair handling still needs test verification.
-- `Reader::parse` does not check for trailing content after the top-level value (e.g. `"1 2"` parses successfully, ignoring the trailing `2`).
+- After parsing the top-level value, `Reader::parse` skips any remaining whitespace/comments and checks that the end of input was reached, so inputs with trailing content such as `"1 2"` are rejected; this check applies to the top level only — trailing whitespace inside arrays/objects is handled by `parseArray`/`parseObject` respectively.
 - The project has only been built and verified with Visual Studio / MSVC (Windows) so far; it has not been tested with other toolchains such as gcc / clang.
 
 ## Reference
