@@ -1,5 +1,7 @@
 ﻿#include "json.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <charconv>
 
 // clang-format off
@@ -363,6 +365,11 @@ bool Reader::parseNumber(Value& value) {
   /* Refer to https://www.json.org/img/number.png */
   const uint8_t c = *cur_;
   if (c != '-' && (c < '0' || c > '9')) return error("invalid character");
+  // JSON forbids leading zeros: "0", "0.5", "0e1" are valid, but "01", "00",
+  // "-01" are not.
+  const char* p = (c == '-') ? cur_ + 1 : cur_;
+  if (p < end_ && *p == '0' && p + 1 < end_ && p[1] >= '0' && p[1] <= '9')
+    return error("leading zero is not allowed");
   double num = 0.0;
   auto result = std::from_chars(cur_, end_, num);
   cur_ = result.ptr;

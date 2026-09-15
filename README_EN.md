@@ -100,7 +100,13 @@ The project builds with C++17 (the `x64` configuration sets `stdcpp17`); `json.h
 - `fail01.json` – `fail33.json`: invalid JSON
 - `fail01_EXCLUDE.json`, `fail18_EXCLUDE.json`: cases marked "implementation-defined / optional" (a top-level string, an overly deep nesting); not used as pass / fail criteria
 
-`main.cpp` parses every file in `test/` and prints the results plus the total time in milliseconds, and also includes a `\uD83D\uDE00` (emoji 😃) surrogate-pair parsing example. Note: **it makes no assertions** — it does not check that valid inputs parse and invalid inputs fail, and there is no CI yet. Assertion-based tests are a TODO.
+`main.cpp` is an assertion-based test program (built as an executable `json_test`). When run, it performs two kinds of checks:
+
+- **File suite**: asserts that every `pass*` file in `test/` parses, and every `fail*` file (except `_EXCLUDE`) is rejected;
+- **Unit tests**: cover basic types, escapes, the `\uD83D\uDE00` surrogate pair, lone-surrogate rejection, trailing-content rejection (e.g. `"1 2"`), number syntax (leading zeros), `dump` round-trip, etc.;
+- **Exit code**: any failed assertion makes the program return a non-zero exit code, and it prints an `N/M checks passed` summary.
+
+The project is built and tested automatically on **Windows (MSVC), Linux (GCC) and macOS (GCC)** via GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Build & run (Visual Studio)
 
@@ -108,7 +114,7 @@ No CMake — this project is a Visual Studio solution (`Json.sln` / `json.vcxpro
 
 1. Install Visual Studio with the C/C++ components and open `Json.sln`;
 2. Select `json_test` → `x64` → `Debug` (or `Release`), then build and run (F5 / Ctrl+F5);
-3. The program scans `test/` under the working directory (the repo root), parses every file and prints the results and the total time.
+3. The program scans `test/` under the working directory (the repo root) and runs the assertions, printing an `N/M checks passed` summary (a non-zero exit code is returned if any assertion fails).
 
 The `x64` configurations set the language standard to C++17 (`stdcpp17`); the `Win32` configurations use the MSVC default. Both require C++17 or newer.
 

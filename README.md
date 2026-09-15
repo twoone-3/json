@@ -100,7 +100,13 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 - `fail01.json` – `fail33.json`：非法 JSON
 - `fail01_EXCLUDE.json`、`fail18_EXCLUDE.json`：套件标注为"实现相关 / 可选"的样例（顶层为字符串、过深嵌套），目前不作为判定依据
 
-`main.cpp` 会遍历 `test/` 逐个解析并打印输出，同时统计总耗时（毫秒），并附带一个 `\uD83D\uDE00`（emoji 😃）代理对解析示例。注意：**该程序不做断言**——它不会校验"合法样例必须解析成功、非法样例必须解析失败"，也未接入 CI。断言式测试是后续待完善项。
+`main.cpp` 是一个带断言的测试程序（编译产物为可执行的 `json_test`），运行时会执行两类检查：
+
+- **文件套件**：断言 `test/` 中 `pass*` 必须解析成功、`fail*`（非 `_EXCLUDE`）必须解析失败；
+- **单元测试**：覆盖基本类型、转义、`\uD83D\uDE00` 代理对、孤立代理拒绝、尾随内容拒绝（如 `"1 2"`）、数字语法（前导零）、`dump` 往返（round-trip）等；
+- **退出码**：任一断言失败即返回非零退出码，并打印 `N/M checks passed` 汇总。
+
+项目通过 GitHub Actions（`.github/workflows/ci.yml`）在 **Windows（MSVC）/ Linux（GCC）/ macOS（GCC）** 三平台自动编译并运行上述测试。
 
 ## 编译与运行（Visual Studio）
 
@@ -108,7 +114,7 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 
 1. 安装 Visual Studio（勾选 C/C++ 组件）后打开 `Json.sln`；
 2. 在右上角选择配置 `json_test` → `x64` → `Debug`（或 `Release`），点击构建并运行（F5 / Ctrl+F5）；
-3. 程序会在当前工作目录（仓库根目录）下扫描 `test/`，逐个解析并输出结果与总耗时。
+3. 程序会在当前工作目录（仓库根目录）下扫描 `test/` 并运行断言测试，打印 `N/M checks passed` 汇总（任一断言失败返回非零退出码）。
 
 工程配置说明：`x64` 配置将语言标准设为 C++17（`stdcpp17`）；`Win32` 配置使用 MSVC 默认语言版本；两种配置均可正常编译（要求 C++17 及以上）。
 

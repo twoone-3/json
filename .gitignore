@@ -1,2 +1,9 @@
 ﻿.vs
 x64
+
+# build artifacts
+*.obj
+*.pdb
+*.ilk
+json_test
+json_test.exe

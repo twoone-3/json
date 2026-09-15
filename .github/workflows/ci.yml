@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install GCC (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gcc
+
+      - name: Build (Windows / MSVC)
+        if: runner.os == 'Windows'
+        run: cl /nologo /std:c++17 /EHsc /W3 /utf-8 /Fe:json_test.exe json.cpp main.cpp
+
+      - name: Build (Linux / GCC)
+        if: runner.os == 'Linux'
+        run: g++ -std=c++17 -Wall -Wextra json.cpp main.cpp -o json_test
+
+      - name: Build (macOS / GCC)
+        if: runner.os == 'macOS'
+        run: |
+          CXX=g++
+          for v in 15 14 13 12; do
+            if command -v g++-$v >/dev/null 2>&1; then CXX=g++-$v; break; fi
+          done
+          $CXX -std=c++17 -Wall -Wextra json.cpp main.cpp -o json_test
+
+      - name: Run tests
+        run: ./json_test
