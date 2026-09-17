@@ -7,6 +7,10 @@ Github: https://github.com/twoone-3/json
 
 #include <charconv>
 
+#ifdef _MSC_VER
+#pragma warning(disable : 4996)
+#endif
+
 // clang-format off
 #define JSON_SKIP_WHITE_SPACE if(!skipWhiteSpace())return false
 #define JSON_CHECK_OUT_OF_RANGE if (cur_ == end_)return error("unexpected ending character")

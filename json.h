@@ -15,8 +15,7 @@ Github: https://github.com/twoone-3/json
 #error json.h require std::c++17
 #endif
 
-#include <cstdio>
-#include <cstdlib>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
