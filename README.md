@@ -1,5 +1,5 @@
 ﻿# json
-一个用 C++ 从零实现的 JSON 解析 / 序列化库。核心仅有 `json.h`（约 150 行）与 `json.cpp`（约 700 行）两个文件，无第三方依赖，在 Windows + Visual Studio（MSVC）下开发与验证。MIT 许可证。
+一个用 C++ 从零实现的 JSON 解析 / 序列化库。核心仅有 `json.h`（约 150 行）与 `json.cpp`（约 700 行）两个文件，无第三方依赖。项目使用 C++17，并通过 GitHub Actions 在 Windows（MSVC）、Linux（GCC）和 macOS（GCC）上自动构建与测试。MIT 许可证。
 
 [简体中文](README.md) | [English](README_EN.md)
 
@@ -28,7 +28,7 @@ GitHub 上已有 nlohmann/json、jsoncpp、RapidJSON 等成熟的 JSON 库。本
 ```
 json.h     API 声明：Type 枚举、Value、Reader、Writer
 json.cpp   实现：UTF-8 转换、递归下降解析器、Writer 序列化
-main.cpp   命令行样例程序（遍历 test/ 并打印解析结果，非断言测试）
+main.cpp   测试程序（运行文件测试和单元测试并输出结果）
 test/      JSON 测试样例（见"测试说明"）
 ```
 
@@ -100,13 +100,13 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 - `fail01.json` – `fail33.json`：非法 JSON
 - `fail01_EXCLUDE.json`、`fail18_EXCLUDE.json`：套件标注为"实现相关 / 可选"的样例（顶层为字符串、过深嵌套），目前不作为判定依据
 
-`main.cpp` 是一个带断言的测试程序（编译产物为可执行的 `json_test`），运行时会执行两类检查：
+`main.cpp` 是项目自带的测试程序（编译产物为可执行的 `json_test`），运行时会执行两类检查：
 
-- **文件套件**：断言 `test/` 中 `pass*` 必须解析成功、`fail*`（非 `_EXCLUDE`）必须解析失败；
+- **文件套件**：检查 `test/` 中 `pass*` 必须解析成功、`fail*`（非 `_EXCLUDE`）必须解析失败；
 - **单元测试**：覆盖基本类型、转义、`\uD83D\uDE00` 代理对、孤立代理拒绝、尾随内容拒绝（如 `"1 2"`）、数字语法（前导零）、`dump` 往返（round-trip）等；
-- **退出码**：任一断言失败即返回非零退出码，并打印 `N/M checks passed` 汇总。
+- **退出码**：任一检查失败即返回非零退出码，并打印 `N/M checks passed` 汇总。
 
-项目通过 GitHub Actions（`.github/workflows/ci.yml`）在 **Windows（MSVC）/ Linux（GCC）/ macOS（GCC）** 三平台自动编译并运行上述测试。
+GitHub Actions（`.github/workflows/ci.yml`）会在 **Windows（MSVC）/ Linux（GCC）/ macOS（GCC）** 三个平台自动编译并运行上述测试，并在 push 到 `master` 或创建 Pull Request 时触发。
 
 ## 编译与运行（Visual Studio）
 
@@ -114,7 +114,7 @@ using Data   = std::variant<nullptr_t, bool, double, std::string, Array, Object>
 
 1. 安装 Visual Studio（勾选 C/C++ 组件）后打开 `Json.sln`；
 2. 在右上角选择配置 `json_test` → `x64` → `Debug`（或 `Release`），点击构建并运行（F5 / Ctrl+F5）；
-3. 程序会在当前工作目录（仓库根目录）下扫描 `test/` 并运行断言测试，打印 `N/M checks passed` 汇总（任一断言失败返回非零退出码）。
+3. 程序会在当前工作目录（仓库根目录）下扫描 `test/` 并运行测试，打印 `N/M checks passed` 汇总（任一检查失败返回非零退出码）。
 
 工程配置说明：`x64` 配置将语言标准设为 C++17（`stdcpp17`）；`Win32` 配置使用 MSVC 默认语言版本；两种配置均可正常编译（要求 C++17 及以上）。
 
@@ -167,3 +167,4 @@ int main() {
 - https://github.com/jo-qzy/MyJson/
 - https://github.com/open-source-parsers/jsoncpp （Unicode / UTF-8 相关实现参考）
 - https://github.com/nlohmann/json
+- https://www.json.org/json-en.html

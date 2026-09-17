@@ -1,5 +1,5 @@
 ﻿# json
-A JSON parsing / serialization library written in C++ from scratch. The core consists of just two files — `json.h` (~150 LOC) and `json.cpp` (~700 LOC) — with no third-party dependencies. Developed and verified on Windows with Visual Studio (MSVC). MIT License.
+A JSON parsing / serialization library written in C++ from scratch. The core consists of just two files — `json.h` (~150 LOC) and `json.cpp` (~700 LOC) — with no third-party dependencies. The project uses C++17 and is automatically built and tested by GitHub Actions on Windows (MSVC), Linux (GCC), and macOS (GCC). MIT License.
 
 [简体中文](README.md) | [English](README_EN.md)
 
@@ -28,7 +28,7 @@ There are already mature JSON libraries like nlohmann/json, jsoncpp and RapidJSO
 ```
 json.h     API declarations: Type enum, Value, Reader, Writer
 json.cpp   Implementation: UTF-8 conversion, recursive-descent parser, Writer
-main.cpp   Command-line sample: iterates test/ and prints results (no assertions)
+main.cpp   Test program: runs the file suite and unit tests and prints results
 test/      JSON test cases (see "Testing")
 ```
 
@@ -100,13 +100,13 @@ The project builds with C++17 (the `x64` configuration sets `stdcpp17`); `json.h
 - `fail01.json` – `fail33.json`: invalid JSON
 - `fail01_EXCLUDE.json`, `fail18_EXCLUDE.json`: cases marked "implementation-defined / optional" (a top-level string, an overly deep nesting); not used as pass / fail criteria
 
-`main.cpp` is an assertion-based test program (built as an executable `json_test`). When run, it performs two kinds of checks:
+`main.cpp` is the project's built-in test program (built as an executable `json_test`). When run, it performs two kinds of checks:
 
-- **File suite**: asserts that every `pass*` file in `test/` parses, and every `fail*` file (except `_EXCLUDE`) is rejected;
+- **File suite**: checks that every `pass*` file in `test/` parses, and every `fail*` file (except `_EXCLUDE`) is rejected;
 - **Unit tests**: cover basic types, escapes, the `\uD83D\uDE00` surrogate pair, lone-surrogate rejection, trailing-content rejection (e.g. `"1 2"`), number syntax (leading zeros), `dump` round-trip, etc.;
-- **Exit code**: any failed assertion makes the program return a non-zero exit code, and it prints an `N/M checks passed` summary.
+- **Exit code**: any failed check makes the program return a non-zero exit code, and it prints an `N/M checks passed` summary.
 
-The project is built and tested automatically on **Windows (MSVC), Linux (GCC) and macOS (GCC)** via GitHub Actions (`.github/workflows/ci.yml`).
+GitHub Actions (`.github/workflows/ci.yml`) automatically builds and runs these tests on **Windows (MSVC), Linux (GCC), and macOS (GCC)**. The workflow runs on pushes to `master` and on pull requests.
 
 ## Build & run (Visual Studio)
 
@@ -114,7 +114,7 @@ No CMake — this project is a Visual Studio solution (`Json.sln` / `json.vcxpro
 
 1. Install Visual Studio with the C/C++ components and open `Json.sln`;
 2. Select `json_test` → `x64` → `Debug` (or `Release`), then build and run (F5 / Ctrl+F5);
-3. The program scans `test/` under the working directory (the repo root) and runs the assertions, printing an `N/M checks passed` summary (a non-zero exit code is returned if any assertion fails).
+3. The program scans `test/` under the working directory (the repo root) and runs the tests, printing an `N/M checks passed` summary (a non-zero exit code is returned if any check fails).
 
 The `x64` configurations set the language standard to C++17 (`stdcpp17`); the `Win32` configurations use the MSVC default. Both require C++17 or newer.
 
@@ -167,3 +167,4 @@ int main() {
 - https://github.com/jo-qzy/MyJson/
 - https://github.com/open-source-parsers/jsoncpp (reference for Unicode / UTF-8 handling)
 - https://github.com/nlohmann/json
+- https://www.json.org/json-en.html

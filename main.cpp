@@ -70,7 +70,8 @@ void runUnitTests() {
   r = Reader();
 
   // 转义
-  check(r.parse(R"("a\n\t\"b\"")", v) && v.asString() == "a\n\t\"b\"", "escapes");
+  check(r.parse(R"("a\n\t\"b\"")", v) && v.asString() == "a\n\t\"b\"",
+        "escapes");
   r = Reader();
 
   // 代理对
@@ -103,14 +104,16 @@ void runUnitTests() {
   r = Reader();
 
   // dump round-trip
-  check(r.parse(R"({"name":"json","version":1,"ok":true})", v), "object parses");
+  check(r.parse(R"({"name":"json","version":1,"ok":true})", v),
+        "object parses");
   Reader r2;
   Value v2;
   check(r2.parse(v.dump(), v2) && v2 == v, "dump round-trip");
 
   // 错误信息
   Reader r3;
-  check(!r3.parse(R"({)", v) && !r3.getError().empty(), "error message present");
+  check(!r3.parse(R"({)", v) && !r3.getError().empty(),
+        "error message present");
 }
 
 }  // namespace
@@ -123,9 +126,11 @@ int main() {
   runFileSuite();
   runUnitTests();
   const auto end = chrono::system_clock::now();
-  const auto ms = chrono::duration_cast<chrono::milliseconds>(end - start).count();
+  const auto ms =
+      chrono::duration_cast<chrono::milliseconds>(end - start).count();
 
-  cout << '\n' << (g_checks - g_failures) << '/' << g_checks << " checks passed";
+  cout << '\n'
+       << (g_checks - g_failures) << '/' << g_checks << " checks passed";
   if (g_failures) cout << ", " << g_failures << " FAILED";
   cout << " (" << ms << " ms)\n";
   return g_failures == 0 ? 0 : 1;

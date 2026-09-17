@@ -1,8 +1,8 @@
 ﻿#include "json.h"
 
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
-#include <charconv>
 
 // clang-format off
 #define JSON_SKIP_WHITE_SPACE if(!skipWhiteSpace())return false
@@ -112,11 +112,8 @@ bool Reader::parse(std::string_view str, Value& value) {
   cur_ = str.data();
   begin_ = str.data();
   end_ = str.data() + str.length();
-  // empty string
+
   JSON_CHECK_OUT_OF_RANGE;
-  // skip BOM
-  if (cur_[0] == 0xEF && cur_[1] == 0xBB && cur_[2] == 0xBF) cur_ += 3;
-  // skip whitespace
   JSON_SKIP_WHITE_SPACE;
   if (!parseValue(value)) {
     value = nullptr;
@@ -144,7 +141,15 @@ bool Reader::parse(std::string_view str, Value& value) {
 bool Reader::parseFile(std::string_view filename, Value& value) {
   char* content = ReadFile(filename.data());
   if (content == nullptr) return false;
-  bool result = parse(content, value);
+  std::string_view json(content);
+
+  if (json.size() >= 3 && static_cast<unsigned char>(json[0]) == 0xEF &&
+      static_cast<unsigned char>(json[1]) == 0xBB &&
+      static_cast<unsigned char>(json[2]) == 0xBF) {
+    json.remove_prefix(3);
+  }
+
+  bool result = parse(json, value);
   free(content);
   return result;
 }
@@ -664,9 +669,9 @@ Value::Value(const char* value) : data_(value) {}
 
 Value::Value(const std::string& value) : data_(value) {}
 
-Value::Value(const Value& other) : data_(other.data_){};
+Value::Value(const Value& other) : data_(other.data_) {};
 
-Value::Value(Value&& other) noexcept : data_(other.data_){};
+Value::Value(Value&& other) noexcept : data_(other.data_) {};
 
 Value::~Value() {}
 
