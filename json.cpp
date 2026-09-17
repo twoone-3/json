@@ -1,8 +1,11 @@
-﻿#include "json.h"
+﻿/*
+Author: twoone3
+Last change: 2026.9.17
+Github: https://github.com/twoone-3/json
+*/
+#include "json.h"
 
 #include <charconv>
-#include <cstdio>
-#include <cstdlib>
 
 // clang-format off
 #define JSON_SKIP_WHITE_SPACE if(!skipWhiteSpace())return false

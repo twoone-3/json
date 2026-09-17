@@ -1,6 +1,6 @@
 ﻿/*
 Author: twoone3
-Last change: 2023.5.24
+Last change: 2026.9.17
 Github: https://github.com/twoone-3/json
 */
 #pragma once
@@ -15,7 +15,8 @@ Github: https://github.com/twoone-3/json
 #error json.h require std::c++17
 #endif
 
-// #include <iostream>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <string_view>
