@@ -4,7 +4,6 @@ Last change: 2023.5.24
 Github: https://github.com/twoone-3/json
 */
 #pragma once
-#pragma warning(disable : 4996)
 
 #if defined(__clang__) || defined(__GNUC__)
 #define CPP_STANDARD __cplusplus
