@@ -1,11 +1,14 @@
 ﻿/*
 Author: twoone3
-Last change: 2026.9.17
+Last change: 2026.10.21
 Github: https://github.com/twoone-3/json
 */
 #include "json.h"
 
 #include <charconv>
+#include <cmath>
+#include <cstring>
+#include <limits>
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4996)
@@ -13,7 +16,7 @@ Github: https://github.com/twoone-3/json
 
 // clang-format off
 #define JSON_SKIP_WHITE_SPACE if(!skipWhiteSpace())return false
-#define JSON_CHECK_OUT_OF_RANGE if (cur_ == end_)return error("unexpected ending character")
+#define JSON_CHECK_OUT_OF_RANGE if (cur_ >= end_)return error("unexpected ending character")
 #define JSON_ASSERT(expr,msg) if (!(expr))Fatal(msg)
 // clang-format on
 
@@ -22,6 +25,110 @@ namespace json {
 static void Fatal(const char* msg) {
   perror(msg);
   exit(-1);
+}
+
+// Reads a file in binary mode. The content may contain NUL bytes, so the
+// length is taken from the file size instead of from strlen().
+static bool ReadFile(std::string_view path, std::string& content) {
+  const std::string filename(path);
+  FILE* pfile = fopen(filename.c_str(), "rb");
+  if (pfile == nullptr) return false;
+  if (fseek(pfile, 0, SEEK_END) != 0) {
+    fclose(pfile);
+    return false;
+  }
+  const long length = ftell(pfile);
+  if (length < 0) {
+    fclose(pfile);
+    return false;
+  }
+  rewind(pfile);
+  content.resize(static_cast<size_t>(length));
+  const size_t read = fread(&content[0], 1, content.size(), pfile);
+  content.resize(read);
+  fclose(pfile);
+  return true;
+}
+
+namespace {
+
+// Increments a nesting counter for the lifetime of the object.
+struct DepthGuard {
+  unsigned& depth;
+  explicit DepthGuard(unsigned& d) : depth(d) { ++depth; }
+  ~DepthGuard() { --depth; }
+};
+
+constexpr unsigned kReplacementCharacter = 0xFFFD;
+constexpr unsigned kDefaultMaxDepth = 512;
+
+}  // namespace
+
+// ---------------------------------------------------------------- UTF-8 ----
+
+// Decodes one UTF-8 code point starting at *cur.
+//
+// Returns false when the bytes at *cur are not a well formed UTF-8 sequence
+// (bad continuation byte, overlong encoding, encoded surrogate, code point
+// above U+10FFFF, truncated sequence). *cur is only advanced on success.
+static bool DecodeUTF8(const char*& cur, const char* end, unsigned& codepoint) {
+  if (cur >= end) return false;
+  const unsigned char b0 = static_cast<unsigned char>(*cur);
+
+  // 0xxxxxxx
+  if (b0 < 0x80) {
+    codepoint = b0;
+    cur += 1;
+    return true;
+  }
+
+  // 110xxxxx 10xxxxxx
+  if (b0 >= 0xC2 && b0 <= 0xDF) {
+    if (end - cur < 2) return false;
+    const unsigned char b1 = static_cast<unsigned char>(cur[1]);
+    if (b1 < 0x80 || b1 > 0xBF) return false;
+    codepoint = ((b0 & 0x1Fu) << 6) | (b1 & 0x3Fu);
+    cur += 2;
+    return true;
+  }
+
+  // 1110xxxx 10xxxxxx 10xxxxxx
+  if (b0 >= 0xE0 && b0 <= 0xEF) {
+    if (end - cur < 3) return false;
+    const unsigned char b1 = static_cast<unsigned char>(cur[1]);
+    const unsigned char b2 = static_cast<unsigned char>(cur[2]);
+    if (b1 < 0x80 || b1 > 0xBF) return false;
+    if (b2 < 0x80 || b2 > 0xBF) return false;
+    // overlong encoding
+    if (b0 == 0xE0 && b1 < 0xA0) return false;
+    // UTF-16 surrogate halves are not valid code points
+    if (b0 == 0xED && b1 > 0x9F) return false;
+    codepoint = ((b0 & 0x0Fu) << 12) | ((b1 & 0x3Fu) << 6) | (b2 & 0x3Fu);
+    cur += 3;
+    return true;
+  }
+
+  // 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+  if (b0 >= 0xF0 && b0 <= 0xF4) {
+    if (end - cur < 4) return false;
+    const unsigned char b1 = static_cast<unsigned char>(cur[1]);
+    const unsigned char b2 = static_cast<unsigned char>(cur[2]);
+    const unsigned char b3 = static_cast<unsigned char>(cur[3]);
+    if (b1 < 0x80 || b1 > 0xBF) return false;
+    if (b2 < 0x80 || b2 > 0xBF) return false;
+    if (b3 < 0x80 || b3 > 0xBF) return false;
+    // overlong encoding
+    if (b0 == 0xF0 && b1 < 0x90) return false;
+    // above U+10FFFF
+    if (b0 == 0xF4 && b1 > 0x8F) return false;
+    codepoint = ((b0 & 0x07u) << 18) | ((b1 & 0x3Fu) << 12) |
+                ((b2 & 0x3Fu) << 6) | (b3 & 0x3Fu);
+    cur += 4;
+    return true;
+  }
+
+  // 0x80 - 0xC1 (continuation byte or overlong) and 0xF5 - 0xFF
+  return false;
 }
 
 static void CodePointToUTF8(std::string& s, unsigned u) {
@@ -42,76 +149,199 @@ static void CodePointToUTF8(std::string& s, unsigned u) {
   }
 }
 
-static unsigned UTF8ToCodepoint(const char*& cur, const char* end) {
-  constexpr unsigned REPLACEMENT_CHARACTER = 0xFFFD;
+// ---------------------------------------------------------------- Number ---
 
-  unsigned firstByte = static_cast<uint8_t>(*cur);
+Number::Number() : kind_(Kind::kDouble), d_(0.0), i_(0), u_(0) {}
 
-  if (firstByte < 0x80) return firstByte;
+Number::Number(double value) : kind_(Kind::kDouble), d_(value), i_(0), u_(0) {}
 
-  if (firstByte < 0xE0) {
-    if (end - cur < 2) return REPLACEMENT_CHARACTER;
+Number::Number(int64_t value) : kind_(Kind::kInt), d_(0.0), i_(value), u_(0) {}
 
-    unsigned calculated =
-        ((firstByte & 0x1F) << 6) | (static_cast<unsigned>(cur[1]) & 0x3F);
-    cur += 1;
-    // oversized encoded characters are invalid
-    return calculated < 0x80 ? REPLACEMENT_CHARACTER : calculated;
+Number::Number(uint64_t value)
+    : kind_(Kind::kUInt), d_(0.0), i_(0), u_(value) {}
+
+Number::Kind Number::kind() const { return kind_; }
+
+bool Number::isInteger() const { return kind_ != Kind::kDouble; }
+
+double Number::asDouble() const {
+  switch (kind_) {
+    case Kind::kDouble:
+      return d_;
+    case Kind::kInt:
+      return static_cast<double>(i_);
+    case Kind::kUInt:
+      return static_cast<double>(u_);
   }
-
-  if (firstByte < 0xF0) {
-    if (end - cur < 3) return REPLACEMENT_CHARACTER;
-
-    unsigned calculated = ((firstByte & 0x0F) << 12) |
-                          ((static_cast<unsigned>(cur[1]) & 0x3F) << 6) |
-                          (static_cast<unsigned>(cur[2]) & 0x3F);
-    cur += 2;
-    // surrogates aren't valid codepoints itself
-    // shouldn't be UTF-8 encoded
-    if (calculated >= 0xD800 && calculated <= 0xDFFF)
-      return REPLACEMENT_CHARACTER;
-    // oversized encoded characters are invalid
-    return calculated < 0x800 ? REPLACEMENT_CHARACTER : calculated;
-  }
-
-  if (firstByte < 0xF8) {
-    if (end - cur < 4) return REPLACEMENT_CHARACTER;
-
-    unsigned calculated = ((firstByte & 0x07) << 18) |
-                          ((static_cast<unsigned>(cur[1]) & 0x3F) << 12) |
-                          ((static_cast<unsigned>(cur[2]) & 0x3F) << 6) |
-                          (static_cast<unsigned>(cur[3]) & 0x3F);
-    cur += 3;
-    // oversized encoded characters are invalid
-    return calculated < 0x10000 ? REPLACEMENT_CHARACTER : calculated;
-  }
-
-  return REPLACEMENT_CHARACTER;
+  return 0.0;
 }
 
-static char* ReadFile(const char* path) {
-  FILE* pfile = fopen(path, "rb");
-  if (pfile == nullptr) return nullptr;
-  fseek(pfile, 0, SEEK_END);
-  size_t length = ftell(pfile);
-  char* data = (char*)malloc((length + 1) * sizeof(char));
-  rewind(pfile);
-  if (data == nullptr) return nullptr;
-  length = fread(data, 1, length, pfile);
-  data[length] = '\0';
-  fclose(pfile);
-  return data;
+int Number::asInt() const {
+  constexpr int64_t kMin = std::numeric_limits<int>::min();
+  constexpr int64_t kMax = std::numeric_limits<int>::max();
+  switch (kind_) {
+    case Kind::kInt:
+      if (i_ < kMin) return static_cast<int>(kMin);
+      if (i_ > kMax) return static_cast<int>(kMax);
+      return static_cast<int>(i_);
+    case Kind::kUInt:
+      if (u_ > static_cast<uint64_t>(kMax)) return static_cast<int>(kMax);
+      return static_cast<int>(u_);
+    case Kind::kDouble:
+      break;
+  }
+  if (std::isnan(d_)) return 0;
+  if (d_ >= static_cast<double>(kMax)) return static_cast<int>(kMax);
+  if (d_ <= static_cast<double>(kMin)) return static_cast<int>(kMin);
+  return static_cast<int>(d_);
 }
+
+unsigned Number::asUInt() const {
+  constexpr uint64_t kMax = std::numeric_limits<unsigned>::max();
+  switch (kind_) {
+    case Kind::kInt:
+      if (i_ < 0) return 0;
+      if (static_cast<uint64_t>(i_) > kMax) return static_cast<unsigned>(kMax);
+      return static_cast<unsigned>(i_);
+    case Kind::kUInt:
+      if (u_ > kMax) return static_cast<unsigned>(kMax);
+      return static_cast<unsigned>(u_);
+    case Kind::kDouble:
+      break;
+  }
+  if (!(d_ > 0.0)) return 0;  // also rejects NaN
+  if (d_ >= static_cast<double>(kMax)) return static_cast<unsigned>(kMax);
+  return static_cast<unsigned>(d_);
+}
+
+int64_t Number::asInt64() const {
+  switch (kind_) {
+    case Kind::kInt:
+      return i_;
+    case Kind::kUInt:
+      if (u_ > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        return std::numeric_limits<int64_t>::max();
+      return static_cast<int64_t>(u_);
+    case Kind::kDouble:
+      break;
+  }
+  if (std::isnan(d_)) return 0;
+  constexpr double kMin = -9223372036854775808.0;  // -2^63
+  constexpr double kMax = 9223372036854775808.0;   //  2^63
+  if (d_ >= kMax) return std::numeric_limits<int64_t>::max();
+  if (d_ <= kMin) return std::numeric_limits<int64_t>::min();
+  return static_cast<int64_t>(d_);
+}
+
+uint64_t Number::asUInt64() const {
+  switch (kind_) {
+    case Kind::kInt:
+      return static_cast<uint64_t>(i_ < 0 ? 0 : i_);
+    case Kind::kUInt:
+      return u_;
+    case Kind::kDouble:
+      break;
+  }
+  if (!(d_ > 0.0)) return 0;  // also rejects NaN
+  constexpr double kMax = 18446744073709551616.0;  // 2^64
+  if (d_ >= kMax) return std::numeric_limits<uint64_t>::max();
+  return static_cast<uint64_t>(d_);
+}
+
+std::string Number::toString() const {
+  // 64 bytes is far more than the longest representation of a double
+  // ("-2.2250738585072014e-308" is 24 characters).
+  char buffer[64];
+  switch (kind_) {
+    case Kind::kInt: {
+      const auto result = std::to_chars(buffer, buffer + sizeof buffer, i_);
+      if (result.ec != std::errc{}) return "null";
+      return std::string(buffer, result.ptr);
+    }
+    case Kind::kUInt: {
+      const auto result = std::to_chars(buffer, buffer + sizeof buffer, u_);
+      if (result.ec != std::errc{}) return "null";
+      return std::string(buffer, result.ptr);
+    }
+    case Kind::kDouble:
+      break;
+  }
+  // NaN and Infinity have no JSON representation.
+  if (!std::isfinite(d_)) return "null";
+  const auto result = std::to_chars(buffer, buffer + sizeof buffer, d_);
+  if (result.ec != std::errc{}) return "null";
+  return std::string(buffer, result.ptr);
+}
+
+namespace {
+
+// Exact conversions used to compare a double against an integer.
+bool DoubleToInt64(double d, int64_t& out) {
+  constexpr double kMin = -9223372036854775808.0;  // -2^63
+  constexpr double kMax = 9223372036854775808.0;   //  2^63
+  if (!(d >= kMin && d < kMax)) return false;
+  if (d != std::trunc(d)) return false;
+  const int64_t value = static_cast<int64_t>(d);
+  if (static_cast<double>(value) != d) return false;
+  out = value;
+  return true;
+}
+
+bool DoubleToUInt64(double d, uint64_t& out) {
+  constexpr double kMax = 18446744073709551616.0;  // 2^64
+  if (!(d >= 0.0 && d < kMax)) return false;
+  if (d != std::trunc(d)) return false;
+  const uint64_t value = static_cast<uint64_t>(d);
+  if (static_cast<double>(value) != d) return false;
+  out = value;
+  return true;
+}
+
+}  // namespace
+
+bool Number::operator==(const Number& other) const {
+  if (kind_ == Kind::kDouble || other.kind_ == Kind::kDouble) {
+    // Compare exactly when the double happens to be an exact integer.
+    if (kind_ == Kind::kDouble && other.kind_ == Kind::kDouble)
+      return d_ == other.d_;
+    const Number& d = (kind_ == Kind::kDouble) ? *this : other;
+    const Number& i = (kind_ == Kind::kDouble) ? other : *this;
+    int64_t di = 0;
+    uint64_t du = 0;
+    if (i.kind_ == Kind::kInt) {
+      if (DoubleToInt64(d.d_, di)) return di == i.i_;
+      return d.d_ == static_cast<double>(i.i_);
+    }
+    if (DoubleToUInt64(d.d_, du)) return du == i.u_;
+    return d.d_ == static_cast<double>(i.u_);
+  }
+  if (kind_ == Kind::kInt && other.kind_ == Kind::kInt) return i_ == other.i_;
+  if (kind_ == Kind::kUInt && other.kind_ == Kind::kUInt)
+    return u_ == other.u_;
+  // One is signed, the other unsigned.
+  const int64_t si = (kind_ == Kind::kInt) ? i_ : other.i_;
+  const uint64_t ui = (kind_ == Kind::kUInt) ? u_ : other.u_;
+  return si >= 0 && static_cast<uint64_t>(si) == ui;
+}
+
+// ---------------------------------------------------------------- Reader ---
 
 Reader::Reader()
     : cur_(nullptr),
       begin_(nullptr),
       end_(nullptr),
       err_(nullptr),
-      allow_comments_(false) {}
+      allow_comments_(false),
+      depth_(0),
+      max_depth_(kDefaultMaxDepth) {}
 
 Reader& Reader::allowComments() {
   allow_comments_ = true;
+  return *this;
+}
+
+Reader& Reader::maxDepth(unsigned depth) {
+  max_depth_ = depth;
   return *this;
 }
 
@@ -119,6 +349,8 @@ bool Reader::parse(std::string_view str, Value& value) {
   cur_ = str.data();
   begin_ = str.data();
   end_ = str.data() + str.length();
+  err_ = nullptr;
+  depth_ = 0;
 
   JSON_CHECK_OUT_OF_RANGE;
   JSON_SKIP_WHITE_SPACE;
@@ -146,22 +378,20 @@ bool Reader::parse(std::string_view str, Value& value) {
 }
 
 bool Reader::parseFile(std::string_view filename, Value& value) {
-  char* content = ReadFile(filename.data());
-  if (content == nullptr) return false;
-  std::string_view json(content);
-
-  if (json.size() >= 3 && static_cast<unsigned char>(json[0]) == 0xEF &&
-      static_cast<unsigned char>(json[1]) == 0xBB &&
-      static_cast<unsigned char>(json[2]) == 0xBF) {
-    json.remove_prefix(3);
+  std::string content;
+  if (!ReadFile(filename, content)) return false;
+  // Skip a leading UTF-8 BOM.
+  if (content.size() >= 3 && static_cast<unsigned char>(content[0]) == 0xEF &&
+      static_cast<unsigned char>(content[1]) == 0xBB &&
+      static_cast<unsigned char>(content[2]) == 0xBF) {
+    content.erase(0, 3);
   }
 
-  bool result = parse(json, value);
-  free(content);
-  return result;
+  return parse(content, value);
 }
 
 std::string Reader::getError() const {
+  if (err_ == nullptr) return {};
   std::string err(err_);
   err += " in line ";
   unsigned line = 1;
@@ -176,6 +406,7 @@ std::string Reader::getError() const {
 }
 
 bool Reader::parseValue(Value& value) {
+  JSON_CHECK_OUT_OF_RANGE;
   switch (*cur_) {
     case 'n':
       return parseNull(value);
@@ -194,31 +425,30 @@ bool Reader::parseValue(Value& value) {
   }
 }
 
+// Matches a literal at cur_ and consumes it.
+bool Reader::matchLiteral(const char* literal, size_t length) {
+  if (static_cast<size_t>(end_ - cur_) < length) return false;
+  if (std::memcmp(cur_, literal, length) != 0) return false;
+  cur_ += length;
+  return true;
+}
+
 bool Reader::parseNull(Value& value) {
-  if (cur_[1] == 'u' && cur_[2] == 'l' && cur_[3] == 'l') {
-    cur_ += 4;
-    value = nullptr;
-    return true;
-  }
-  return error("Missing 'null'");
+  if (!matchLiteral("null", 4)) return error("Missing 'null'");
+  value = nullptr;
+  return true;
 }
 
 bool Reader::parseTrue(Value& value) {
-  if (cur_[1] == 'r' && cur_[2] == 'u' && cur_[3] == 'e') {
-    cur_ += 4;
-    value = true;
-    return true;
-  }
-  return error("Missing 'true'");
+  if (!matchLiteral("true", 4)) return error("Missing 'true'");
+  value = true;
+  return true;
 }
 
 bool Reader::parseFalse(Value& value) {
-  if (cur_[1] == 'a' && cur_[2] == 'l' && cur_[3] == 's' && cur_[4] == 'e') {
-    cur_ += 5;
-    value = false;
-    return true;
-  }
-  return error("Missing 'false'");
+  if (!matchLiteral("false", 5)) return error("Missing 'false'");
+  value = false;
+  return true;
 }
 
 bool Reader::parseString(Value& value) {
@@ -229,18 +459,19 @@ bool Reader::parseString(Value& value) {
 }
 
 bool Reader::parseString(std::string& s) {
+  // cur_ points at the opening quote.
+  ++cur_;
   while (true) {
-    // "xxxx"
-    // ^
-    char c = *++cur_;
+    if (cur_ >= end_) return error("missing '\"'");
+    const char c = *cur_;
     switch (c) {
-      case '\0':
-        return error("missing '\"'");
       case '"':
         ++cur_;
         return true;
-      case '\\':
-        switch (*++cur_) {
+      case '\\': {
+        if (cur_ + 1 >= end_) return error("invalid escape");
+        ++cur_;
+        switch (*cur_) {
           case '"':
             s += '"';
             break;
@@ -291,40 +522,57 @@ bool Reader::parseString(std::string& s) {
           default:
             return error("invalid escape");
         }
+        // Move behind the escape sequence.
+        ++cur_;
         break;
+      }
       default:
         if (static_cast<uint8_t>(c) < ' ')
           return error(
               "The ASCII code of the characters in the string must be greater "
               "than 32");
+        if (static_cast<uint8_t>(c) >= 0x80) {
+          // RFC 8259: the text has to be encoded in UTF-8.
+          const char* next = cur_;
+          unsigned codepoint = 0;
+          if (!DecodeUTF8(next, end_, codepoint))
+            return error("invalid UTF-8 sequence");
+          s.append(cur_, static_cast<size_t>(next - cur_));
+          cur_ = next;
+          continue;
+        }
         s += c;
+        ++cur_;
         break;
     }
   }
 }
 
 bool Reader::parseHex4(unsigned& u) {
-  // u = 0;
-  char ch = 0;
+  u = 0;
   for (unsigned i = 0; i < 4; ++i) {
-    u <<= 4;
     // "x\u0123x"
     //    ^
-    ch = *++cur_;
-    JSON_CHECK_OUT_OF_RANGE;
+    if (cur_ + 1 >= end_) return error("unexpected ending character");
+    const char ch = *++cur_;
+    unsigned digit = 0;
     if (ch >= '0' && ch <= '9')
-      u |= ch - '0';
+      digit = static_cast<unsigned>(ch - '0');
     else if (ch >= 'a' && ch <= 'f')
-      u |= ch - 'a' + 10;
+      digit = static_cast<unsigned>(ch - 'a' + 10);
     else if (ch >= 'A' && ch <= 'F')
-      u |= ch - 'A' + 10;
+      digit = static_cast<unsigned>(ch - 'A' + 10);
     else
       return error("invalid character");
+    u = (u << 4) | digit;
   }
   return true;
 }
 
 bool Reader::parseArray(Value& value) {
+  if (depth_ >= max_depth_) return error("maximum nesting depth exceeded");
+  DepthGuard guard(depth_);
+
   ++cur_;
   value.data_ = Array();
   JSON_SKIP_WHITE_SPACE;
@@ -346,6 +594,9 @@ bool Reader::parseArray(Value& value) {
 }
 
 bool Reader::parseObject(Value& value) {
+  if (depth_ >= max_depth_) return error("maximum nesting depth exceeded");
+  DepthGuard guard(depth_);
+
   ++cur_;
   value.data_ = Object();
   JSON_SKIP_WHITE_SPACE;
@@ -373,65 +624,131 @@ bool Reader::parseObject(Value& value) {
   }
 }
 
+// Parses a JSON number.
+//
+// The grammar is validated by hand, because std::from_chars follows the
+// strtod rules and therefore accepts things JSON does not allow ("1.",
+// "-Infinity", ...).
+//
+//   number = [ minus ] int [ frac ] [ exp ]
 bool Reader::parseNumber(Value& value) {
-  /* Refer to https://www.json.org/img/number.png */
-  const uint8_t c = *cur_;
-  if (c != '-' && (c < '0' || c > '9')) return error("invalid character");
-  // JSON forbids leading zeros: "0", "0.5", "0e1" are valid, but "01", "00",
-  // "-01" are not.
-  const char* p = (c == '-') ? cur_ + 1 : cur_;
-  if (p < end_ && *p == '0' && p + 1 < end_ && p[1] >= '0' && p[1] <= '9')
-    return error("leading zero is not allowed");
+  const char* p = cur_;
+  if (p >= end_) return error("unexpected ending character");
+  if (*p == '-') ++p;
+  if (p >= end_ || *p < '0' || *p > '9') return error("invalid character");
+
+  // int: "0" or [1-9] *DIGIT
+  if (*p == '0') {
+    ++p;
+  } else {
+    while (p < end_ && *p >= '0' && *p <= '9') ++p;
+  }
+
+  bool is_double = false;
+
+  // frac: "." 1*DIGIT
+  if (p < end_ && *p == '.') {
+    is_double = true;
+    ++p;
+    if (p >= end_ || *p < '0' || *p > '9')
+      return error("invalid number, digits expected after '.'");
+    while (p < end_ && *p >= '0' && *p <= '9') ++p;
+  }
+
+  // exp: ("e" / "E") [ minus / plus ] 1*DIGIT
+  if (p < end_ && (*p == 'e' || *p == 'E')) {
+    is_double = true;
+    ++p;
+    if (p < end_ && (*p == '+' || *p == '-')) ++p;
+    if (p >= end_ || *p < '0' || *p > '9')
+      return error("invalid number, digits expected in exponent");
+    while (p < end_ && *p >= '0' && *p <= '9') ++p;
+  }
+
+  const char* const number_end = p;
+
+  if (!is_double) {
+    // Keep integers exact. "-0" is kept as a double so that its sign
+    // survives the round trip.
+    const bool negative_zero =
+        (number_end - cur_ == 2 && cur_[0] == '-' && cur_[1] == '0');
+    if (!negative_zero) {
+      int64_t i = 0;
+      auto result = std::from_chars(cur_, number_end, i);
+      if (result.ec == std::errc{}) {
+        cur_ = number_end;
+        value = i;
+        return true;
+      }
+      if (result.ec == std::errc::result_out_of_range) {
+        uint64_t u = 0;
+        auto u_result = std::from_chars(cur_, number_end, u);
+        if (u_result.ec == std::errc{}) {
+          cur_ = number_end;
+          value = u;
+          return true;
+        }
+      }
+      return error("number out of range");
+    }
+  }
+
   double num = 0.0;
-  auto result = std::from_chars(cur_, end_, num);
-  cur_ = result.ptr;
+  auto result = std::from_chars(cur_, number_end, num);
   if (result.ec == std::errc::result_out_of_range)
     return error("number out of range");
+  if (result.ec != std::errc{}) return error("invalid number");
+  cur_ = number_end;
   value = num;
   return true;
 }
 
 bool Reader::skipWhiteSpace() {
   while (true) {
+    if (cur_ >= end_) return error("unexpected ending character");
     switch (*cur_) {
-      case '\0':
-        return error("unexpected ending character");
       case '\t':
       case '\n':
       case '\r':
       case ' ':
-        break;
+        ++cur_;
+        continue;
       case '/':
+        // skipComment() leaves cur_ on the first character behind the
+        // comment, so nothing may be consumed here.
         if (!skipComment()) return false;
-        break;
+        continue;
       default:
         return true;
     }
-    ++cur_;
-    JSON_CHECK_OUT_OF_RANGE;
   }
-  return true;
 }
 
 bool Reader::skipComment() {
   // If it is true, it is allowed to parse comments in the style of'//' or'/**/'
   if (!allow_comments_) return error("comments are not allowed");
-  ++cur_;
-  if (*cur_ == '/') {
-    while (*++cur_ != '\n') {
-      JSON_CHECK_OUT_OF_RANGE;
+  if (cur_ + 1 >= end_) return error("invalied comment style");
+  const char style = *++cur_;
+  if (style == '/') {
+    while (true) {
+      if (cur_ + 1 >= end_) return error("unexpected ending character");
+      const char c = *++cur_;
+      if (c == '\n') {
+        ++cur_;
+        return true;
+      }
     }
-    ++cur_;
-    return true;
-  } else if (*cur_ == '*') {
-    while (*++cur_ != '*') {
-      JSON_CHECK_OUT_OF_RANGE;
+  } else if (style == '*') {
+    while (true) {
+      if (cur_ + 1 >= end_) return error("missing '*/'");
+      const char c = *++cur_;
+      if (c != '*') continue;
+      if (cur_ + 1 >= end_) return error("missing '*/'");
+      if (*++cur_ == '/') {
+        ++cur_;
+        return true;
+      }
     }
-    if (*++cur_ == '/') {
-      ++cur_;
-      return true;
-    }
-    return error("missing '*/'");
   } else {
     return error("invalied comment style");
   }
@@ -441,6 +758,8 @@ bool Reader::error(const char* err) {
   err_ = err;
   return false;
 }
+
+// ---------------------------------------------------------------- Writer ---
 
 Writer::Writer() : out_(), depth_of_indentation_(0), emit_utf8_(false) {}
 
@@ -527,9 +846,8 @@ void Writer::writeBoolean(const Value& value) {
 }
 
 void Writer::writeNumber(const Value& value) {
-  char buffer[21]{0};
-  std::to_chars(buffer, buffer + sizeof buffer, value.asDouble());
-  out_.append(buffer);
+  // NaN and Infinity have no JSON representation, they are written as null.
+  out_ += value.asNumber().toString();
 }
 
 void Writer::writeString(std::string_view str) {
@@ -537,65 +855,82 @@ void Writer::writeString(std::string_view str) {
   const char* end = cur + str.length();
   out_ += '"';
   while (cur < end) {
-    char c = *cur;
+    const unsigned char c = static_cast<unsigned char>(*cur);
     switch (c) {
       case '"':
         out_ += "\\\"";
-        break;
+        ++cur;
+        continue;
       case '\\':
         out_ += "\\\\";
-        break;
+        ++cur;
+        continue;
       case '\b':
         out_ += "\\b";
-        break;
+        ++cur;
+        continue;
       case '\f':
         out_ += "\\f";
-        break;
+        ++cur;
+        continue;
       case '\n':
         out_ += "\\n";
-        break;
+        ++cur;
+        continue;
       case '\r':
         out_ += "\\r";
-        break;
+        ++cur;
+        continue;
       case '\t':
         out_ += "\\t";
-        break;
+        ++cur;
+        continue;
       default:
-        writeChar(cur, end, c);
+        break;
+    }
+    // Control characters have to be escaped.
+    if (c < 0x20) {
+      out_ += "\\u";
+      writeHex16Bit(c);
+      ++cur;
+      continue;
+    }
+    if (c < 0x80) {
+      out_ += static_cast<char>(c);
+      ++cur;
+      continue;
+    }
+    // Multi byte sequence: the text has to be valid UTF-8.
+    const char* next = cur;
+    unsigned codepoint = 0;
+    if (DecodeUTF8(next, end, codepoint)) {
+      if (emit_utf8_) {
+        out_.append(cur, static_cast<size_t>(next - cur));
+      } else if (codepoint < 0x10000) {
+        // Basic Multilingual Plane
+        out_ += "\\u";
+        writeHex16Bit(codepoint);
+      } else {
+        // Extended Unicode. Encode 20 bits as a surrogate pair.
+        codepoint -= 0x10000;
+        out_ += "\\u";
+        writeHex16Bit(0xD800 + ((codepoint >> 10) & 0x3FF));
+        out_ += "\\u";
+        writeHex16Bit(0xDC00 + (codepoint & 0x3FF));
+      }
+      cur = next;
+      continue;
+    }
+    // Invalid UTF-8: substitute the replacement character.
+    if (emit_utf8_) {
+      out_ += "\xEF\xBF\xBD";  // U+FFFD
+    } else {
+      out_ += "\\u";
+      writeHex16Bit(kReplacementCharacter);
     }
     ++cur;
   }
   out_ += '"';
-}
-
-void Writer::writeChar(const char*& cur, const char* end, char c) {
-  if (emit_utf8_) {
-    if (uint8_t(c) < 0x20) {
-      out_ += "\\u";
-      writeHex16Bit(c);
-    } else {
-      out_ += c;
-    }
-  } else {
-    unsigned codepoint = UTF8ToCodepoint(cur, end);  // modifies `c`
-    if (codepoint < 0x20) {
-      out_ += "\\u";
-      writeHex16Bit(codepoint);
-    } else if (codepoint < 0x80) {
-      out_ += static_cast<char>(codepoint);
-    } else if (codepoint < 0x10000) {
-      // Basic Multilingual Plane
-      out_ += "\\u";
-      writeHex16Bit(codepoint);
-    } else {
-      // Extended Unicode. Encode 20 bits as a surrogate pair.
-      codepoint -= 0x10000;
-      out_ += "\\u";
-      writeHex16Bit(0xD800 + ((codepoint >> 10) & 0x3FF));
-      out_ += "\\u";
-      writeHex16Bit(0xDC00 + (codepoint & 0x3FF));
-    }
-  }
 }
 
 void Writer::writeArray(const Value& value) {
@@ -664,13 +999,19 @@ void Writer::writeObjectFormatted(const Value& value) {
   out_ += '}';
 }
 
+// ----------------------------------------------------------------- Value ---
+
 Value::Value() : data_(nullptr) {}
 
 Value::Value(nullptr_t) : data_(nullptr) {}
 
 Value::Value(bool value) : data_(value) {}
 
-Value::Value(double value) : data_(value) {}
+Value::Value(double value) : data_(Number(value)) {}
+
+Value::Value(int64_t value) : data_(Number(value)) {}
+
+Value::Value(uint64_t value) : data_(Number(value)) {}
 
 Value::Value(const char* value) : data_(value) {}
 
@@ -702,7 +1043,7 @@ Value& Value::operator[](const std::string& index) {
 Value& Value::operator[](size_t index) {
   JSON_ASSERT(isArray() || isNull(), "Value must be array or null");
   if (isNull()) data_ = Array();
-  if (asArray().size() < index) Fatal("index out of range");
+  if (index >= asArray().size()) Fatal("index out of range");
   return asArray()[index];
 }
 
@@ -714,21 +1055,17 @@ void Value::insert(const std::string& index, Value&& value) {
 
 bool Value::asBool() const { return std::get<bool>(data_); }
 
-int Value::asInt() const { return static_cast<int>(std::get<double>(data_)); }
+int Value::asInt() const { return std::get<Number>(data_).asInt(); }
 
-unsigned Value::asUInt() const {
-  return static_cast<unsigned>(std::get<double>(data_));
-}
+unsigned Value::asUInt() const { return std::get<Number>(data_).asUInt(); }
 
-int64_t Value::asInt64() const {
-  return static_cast<int64_t>(std::get<double>(data_));
-}
+int64_t Value::asInt64() const { return std::get<Number>(data_).asInt64(); }
 
-uint64_t Value::asUInt64() const {
-  return static_cast<uint64_t>(std::get<double>(data_));
-}
+uint64_t Value::asUInt64() const { return std::get<Number>(data_).asUInt64(); }
 
-double Value::asDouble() const { return std::get<double>(data_); }
+double Value::asDouble() const { return std::get<Number>(data_).asDouble(); }
+
+Number Value::asNumber() const { return std::get<Number>(data_); }
 
 std::string Value::asString() const { return std::get<std::string>(data_); }
 
