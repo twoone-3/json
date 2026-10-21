@@ -19,7 +19,7 @@ There are already mature JSON libraries like nlohmann/json, jsoncpp and RapidJSO
 - Parse from a string (`Reader::parse`) or a file (`Reader::parseFile`, skips UTF-8 BOM)
 - Serialize compactly (`Writer::writeValue`) or pretty-printed (`Writer::writeValueFormatted`, configurable indent); or simply use `Value::dump()`
 - Escape sequences and `\uXXXX`; `Writer::emit_utf8()` can emit UTF-8 instead of escapes
-- Integers are kept exactly as 64-bit values (`12345678901234567890` survives a round trip); fractions are stored as `double`
+- Integers are kept exactly as 64-bit values (`12345678901234567890` survives a round trip); fractions and exponent forms are stored as `double`
 - Strict UTF-8 validation: the reader rejects malformed UTF-8 byte sequences, the writer replaces invalid bytes with `U+FFFD`
 - Bounded nesting depth (512 by default, tunable via `Reader::maxDepth()`) so that deeply nested input cannot exhaust the stack
 - Optional `//` and `/* */` comments (`Reader::allowComments`, off by default)
@@ -69,8 +69,8 @@ using Data   = std::variant<nullptr_t, bool, Number, std::string, Array, Object>
 
 ### Numbers: `Number`
 
-Numbers are no longer stored as a plain `double`; they are wrapped in a `Number`
-class that preserves the exact representation they were written in:
+Numbers are represented by a `Number` class that preserves the exact
+representation they were written in:
 
 ```cpp
 class Number {
@@ -82,10 +82,10 @@ class Number {
 - `kUInt`: an integer above `INT64_MAX` that fits into `uint64_t`;
 - `kDouble`: fractions, exponent forms and `-0`.
 
-Consequently `{"id":12345678901234567890}` still serializes to
-`12345678901234567890` instead of being silently rewritten to `1.2345678901234567e+19`.
-`Value::asDouble()` / `asInt()` / `asInt64()` keep working as before and saturate
-instead of invoking undefined behaviour when the value does not fit.
+Consequently `{"id":12345678901234567890}` serializes to `12345678901234567890`
+without losing a single digit. `Value::asDouble()` / `asInt()` / `asInt64()`
+provide lossy conversions that saturate when the value does not fit, never
+invoking undefined behaviour.
 
 ### Parser: `Reader`
 
@@ -168,7 +168,7 @@ naming convention is:
 
 - **End-to-end documents**: every document in `test/` must parse, and `Value::dump()` must re-parse to an equal value (round-trip);
 - **JSONTestSuite**: walks `test/jsonsuite/`, requires all 95 `y_` cases to parse and all 188 `n_` cases to be rejected, and verifies that `Value::dump()` can be re-parsed (round-trip); `i_` cases are only counted;
-- **Behaviour & regression tests**: only cover what the official suite cannot express — this library's extensions (comments, the nesting-depth limit, `emit_utf8`), API-level behaviour (type predicates, numeric conversion, `getError()`, duplicate keys), and the defects that were reported (number buffer overflow, `NaN` / `Infinity`, comments eating a character, out-of-bounds reads, stack overflow, silent rewriting of invalid UTF-8, loss of integer precision, …). Whether a document is valid JSON at all is left to the official suite and is not repeated here;
+- **Behaviour & regression tests**: only cover what the official suite cannot express — this library's extensions (comments, the nesting-depth limit, `emit_utf8`), API-level behaviour (type predicates, numeric conversion, `getError()`, duplicate keys), and regression coverage for known defects (number buffer overflow, `NaN` / `Infinity`, comments eating a character, out-of-bounds reads, stack overflow, silent rewriting of invalid UTF-8, loss of integer precision, …). Whether a document is valid JSON at all is left to the official suite and is not repeated here;
 - **Exit code**: any failed check makes the program return a non-zero exit code, and it prints an `N/M checks passed` summary.
 
 Current result: **72/72 checks passed** (JSONTestSuite: 95/95 `y_`, 188/188 `n_`, 0 round-trip failures).
@@ -183,7 +183,7 @@ The following behaviour is intentional; the first two are explicitly permitted b
 2. **Number precision**: integers outside `int64_t` / `uint64_t` (e.g. `99999999999999999999`) are rejected as well.
 3. **Key order**: objects are stored in a `std::map`, so serialization emits the keys in lexicographic order, independent of the input order.
 4. **Duplicate keys**: in `{"a":1,"a":2}` the last value wins (like most JSON libraries).
-5. **Comment extension**: disabled by default; `Reader::allowComments()` has to be called explicitly, and with comments enabled the input is no longer strictly valid JSON.
+5. **Comment extension**: disabled by default; `Reader::allowComments()` has to be called explicitly, and with comments enabled the input does not conform to strict JSON syntax.
 6. **Type mismatch**: `asInt()` / `asString()` and friends throw `std::bad_variant_access` (from `std::get`) on a type mismatch instead of returning a default value.
 
 ## Build & run (Visual Studio)

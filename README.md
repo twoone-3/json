@@ -19,7 +19,7 @@ GitHub 上已有 nlohmann/json、jsoncpp、RapidJSON 等成熟的 JSON 库。本
 - 解析字符串 / 文件：`Reader::parse`、`Reader::parseFile`（自动跳过 UTF-8 BOM）
 - 序列化：紧凑输出（`Writer::writeValue`）与美化输出（`Writer::writeValueFormatted`，缩进可配置），也可直接使用 `Value::dump()`
 - 字符串转义与 `\uXXXX` 处理；`Writer::emit_utf8()` 可选输出 UTF-8 而非转义
-- 整数按 64 位整数精确保留（`12345678901234567890` 往返后不变），小数按 `double` 存储
+- 整数按 64 位精确保留（`12345678901234567890` 往返后不变），小数与指数形式按 `double` 存储
 - 严格校验 UTF-8：解析器拒绝非法 UTF-8 字节序列，序列化器把非法字节替换为 `U+FFFD`
 - 限制嵌套深度（默认 512 层，`Reader::maxDepth()` 可调），避免超深输入导致栈溢出
 - 可选的 `//` 与 `/* */` 注释扩展（`Reader::allowComments`，默认关闭）
@@ -66,7 +66,7 @@ using Data   = std::variant<nullptr_t, bool, Number, std::string, Array, Object>
 
 ### 数字：`Number`
 
-数字不再统一按 `double` 存储，而是封装成 `Number` 类，保留写入时的精确表示：
+数字由 `Number` 类表示，保留写入时的精确表示：
 
 ```cpp
 class Number {
@@ -78,10 +78,10 @@ class Number {
 - `kUInt`：超过 `INT64_MAX` 但能放进 `uint64_t` 的整数；
 - `kDouble`：小数、指数形式以及 `-0`。
 
-这样 `{"id":12345678901234567890}` 解析后再序列化仍是 `12345678901234567890`，
-不会像统一按浮点存储那样被悄悄改写成 `1.2345678901234567e+19`。
-`Value::asDouble()` / `asInt()` / `asInt64()` 等接口照常可用，超出目标类型范围时会
-做饱和截断（而不是触发未定义行为）。
+整数按 64 位精确保留：`{"id":12345678901234567890}` 解析后再序列化仍是
+`12345678901234567890`，每一位都不会丢失。
+`Value::asDouble()` / `asInt()` / `asInt64()` 等接口提供有损转换，超出目标类型范围时
+做饱和截断，不会触发未定义行为。
 
 ### 解析器：`Reader`
 
@@ -161,7 +161,7 @@ class Number {
 
 - **端到端样例**：`test/` 下的每份文档都必须解析成功，且 `Value::dump()` 的结果能重新解析（往返一致）；
 - **JSONTestSuite**：遍历 `test/jsonsuite/`，要求 95 个 `y_` 全部解析成功、188 个 `n_` 全部被拒绝，并检查 `Value::dump()` 的结果能被重新解析（往返一致性）；`i_` 只统计；
-- **行为与回归测试**：只覆盖官方套件表达不了的部分 —— 本库的扩展（注释、嵌套深度上限、`emit_utf8`）、API 层面的行为（类型判断、数值转换、`getError()`、重复键），以及曾经报告过的缺陷（数字缓冲区溢出、`NaN`/`Infinity`、注释吞字符、越界读、栈溢出、非法 UTF-8 静默改写、整数精度丢失等）。JSON 语法本身的正误一律由官方套件负责，不在这里重复；
+- **行为与回归测试**：只覆盖官方套件表达不了的部分 —— 本库的扩展（注释、嵌套深度上限、`emit_utf8`）、API 层面的行为（类型判断、数值转换、`getError()`、重复键），以及历史缺陷的回归覆盖（数字缓冲区溢出、`NaN`/`Infinity`、注释吞字符、越界读、栈溢出、非法 UTF-8 静默改写、整数精度丢失等）。JSON 语法本身的正误一律由官方套件负责，不在这里重复；
 - **退出码**：任一检查失败即返回非零退出码，并打印 `N/M checks passed` 汇总。
 
 当前结果：**72/72 checks passed**（其中 JSONTestSuite：95/95 `y_`、188/188 `n_`、0 个往返失败）。
@@ -176,7 +176,7 @@ GitHub Actions（`.github/workflows/ci.yml`）会在 **Windows（MSVC）/ Linux�
 2. **数字精度**：超出 `int64_t` / `uint64_t` 的整数（如 `99999999999999999999`）同样会被拒绝。
 3. **对象键顺序**：对象用 `std::map` 存储，序列化时按键的字典序输出，与输入顺序无关。
 4. **重复键**：`{"a":1,"a":2}` 中后一个值生效（与多数 JSON 库一致）。
-5. **注释扩展**：默认关闭，需要显式调用 `Reader::allowComments()`；开启后输入不再是严格合法的 JSON。
+5. **注释扩展**：默认关闭，需要显式调用 `Reader::allowComments()`；开启注释后，输入不满足严格合法的 JSON 语法。
 6. **类型不匹配**：`asInt()` / `asString()` 等在类型不匹配时抛出 `std::bad_variant_access`（由 `std::get` 抛出），而不是返回默认值。
 
 ## 编译与运行（Visual Studio）
